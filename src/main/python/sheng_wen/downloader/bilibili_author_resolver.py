@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
@@ -41,6 +43,11 @@ def _extract_bilibili_author(video_url: str) -> BilibiliAuthorInfo:
         "skip_download": True,
         "extract_flat": False,
     }
+
+    # B 站需要 cookie 避免 412
+    cookie_file = os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")
+    if os.path.exists(cookie_file):
+        ydl_opts['cookiefile'] = cookie_file
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info_dict = ydl.extract_info(video_url, download=False)

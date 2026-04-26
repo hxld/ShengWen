@@ -679,6 +679,14 @@ class VideoDownloaderWorker(Worker):
             if ffmpeg_location:
                 ydl_opts['ffmpeg_location'] = ffmpeg_location
 
+            # B 站视频使用 cookie 文件避免 412 反爬
+            if self._is_bilibili_url(video_url):
+                import tempfile
+                cookie_file = os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")
+                if os.path.exists(cookie_file):
+                    ydl_opts['cookiefile'] = cookie_file
+                    logger.info(f"[{self.name}] B 站下载：使用 cookie 文件")
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info_dict = ydl.extract_info(video_url, download=True)
                 video_path = ydl.prepare_filename(info_dict)

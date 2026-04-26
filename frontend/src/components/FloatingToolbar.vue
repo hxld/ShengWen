@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PhSparkle, PhArticle, PhCaretDown, PhArrowClockwise, PhCopy, PhDownloadSimple, PhImageSquare, PhGearSix, PhList } from '@phosphor-icons/vue'
+import { PhSparkle, PhArticle, PhCaretDown, PhArrowClockwise, PhCopy, PhDownloadSimple, PhImageSquare, PhGearSix, PhList, PhExport } from '@phosphor-icons/vue'
 import { TaskStatus, type Task, type MarkdownHeadingItem } from '../types'
 import FloatingToolbarShell from './FloatingToolbarShell.vue'
 import FloatingToolbarChapterNav from './FloatingToolbarChapterNav.vue'
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   downloadTxt: []
   exportSummaryImage: []
   openSummaryImageSettings: []
+  exportObsidian: []
   toggleSidebar: []
   jumpHeading: [headingId: string]
 }>()
@@ -88,6 +89,14 @@ const emit = defineEmits<{
                 >
                   <PhDownloadSimple :size="14" />
                   下载 Markdown
+                </button>
+                <button
+                  v-if="selectedTask?.status === TaskStatus.COMPLETED"
+                  @click="emit('exportObsidian')"
+                  class="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
+                >
+                  <PhExport :size="14" />
+                  导出到知识库
                 </button>
                 <div
                   v-if="selectedTask?.summary"

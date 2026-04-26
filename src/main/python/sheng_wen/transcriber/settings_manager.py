@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from threading import Lock
 from typing import Any, Literal
 
@@ -344,6 +345,7 @@ class TranscriptionSettingsManager:
             "has_bilibili_sessdata": bool(sessdata),
             "bilibili_cookie_source": source,
             "bilibili_sessdata_masked": _mask_cookie_value(sessdata),
+            "has_bilibili_cookie_string": os.path.exists(os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")),
         }
 
     def _build_transcriber_kwargs(

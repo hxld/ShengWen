@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import tempfile
 from dataclasses import MISSING, dataclass, fields as dataclass_fields
 from pathlib import Path
 from threading import Lock
@@ -56,6 +58,7 @@ class WhisperConfig:
     device: Literal["cpu", "cuda"] = "cpu"
     enable_bilibili_subtitle_fetch: bool = True
     bilibili_sessdata: str = ""
+    bilibili_cookie_string: str = ""
     faster_whisper_model_path: str | None = None
 
     @property
@@ -250,6 +253,20 @@ class JSONConfigManager:
         with self._lock:
             return copy.deepcopy(self._config)
 
+    @staticmethod
+    def _write_netscape_cookie_file(cookie_str: str):
+        cookie_file = os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")
+        with open(cookie_file, "w", encoding="utf-8") as f:
+            f.write("# Netscape HTTP Cookie File\n")
+            for pair in cookie_str.split(";"):
+                pair = pair.strip()
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    k, v = k.strip(), v.strip()
+                    if k:
+                        f.write(f".bilibili.com\tTRUE\t/\tTRUE\t0\t{k}\t{v}\n")
+        logger.info(f"已写入 B 站 yt-dlp cookie 文件: {cookie_file}")
+
     def update_section(self, section: str, payload: dict[str, Any]):
         if not isinstance(payload, dict):
             raise ValueError("配置更新 payload 必须是 JSON 对象")
@@ -294,6 +311,16 @@ class JSONConfigManager:
             whisper_patch["enable_bilibili_subtitle_fetch"] = bool(payload["enable_bilibili_subtitle_fetch"])
         if "bilibili_sessdata" in payload:
             whisper_patch["bilibili_sessdata"] = str(payload.get("bilibili_sessdata") or "")
+        if payload.get("clear_bilibili_cookie_string"):
+            whisper_patch["bilibili_cookie_string"] = ""
+            cookie_file = os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")
+            if os.path.exists(cookie_file):
+                os.remove(cookie_file)
+        elif "bilibili_cookie_string" in payload:
+            cookie_str = str(payload.get("bilibili_cookie_string") or "").strip()
+            whisper_patch["bilibili_cookie_string"] = cookie_str
+            if cookie_str:
+                self._write_netscape_cookie_file(cookie_str)
         if whisper_patch:
             self.update_section("whisper", whisper_patch)
 
@@ -377,6 +404,7 @@ class JSONConfigManager:
                 raw.get("enable_bilibili_subtitle_fetch", defaults["enable_bilibili_subtitle_fetch"])
             ),
             bilibili_sessdata=str(raw.get("bilibili_sessdata", defaults["bilibili_sessdata"]) or ""),
+            bilibili_cookie_string=str(raw.get("bilibili_cookie_string", defaults.get("bilibili_cookie_string", "")) or ""),
             faster_whisper_model_path=faster_whisper_model_path,
         )
 

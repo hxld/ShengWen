@@ -202,6 +202,7 @@ class TranscriptionSettings(BaseModel):
     has_bilibili_sessdata: bool
     bilibili_cookie_source: str
     bilibili_sessdata_masked: str
+    has_bilibili_cookie_string: bool
 
 
 class TranscriptionSettingsUpdate(BaseModel):
@@ -220,6 +221,14 @@ class TranscriptionSettingsUpdate(BaseModel):
     clear_bilibili_sessdata: Optional[bool] = Field(
         default=None,
         description="是否清空当前保存的全局 B 站 SESSDATA",
+    )
+    bilibili_cookie_string: Optional[str] = Field(
+        default=None,
+        description="B 站完整 cookie 字符串（用于 yt-dlp 下载，格式: key1=val1; key2=val2）",
+    )
+    clear_bilibili_cookie_string: Optional[bool] = Field(
+        default=None,
+        description="是否清空已保存的 B 站完整 cookie 字符串及 cookie 文件",
     )
 
 
@@ -1086,6 +1095,82 @@ async def update_task(task_id: str, task_update: TaskUpdate):
         return updated_task
 
     return task
+
+
+class ExportObsidianResponse(BaseModel):
+    success: bool = Field(description="是否导出成功")
+    file_path: str = Field(default="", description="导出文件路径")
+    error: str = Field(default="", description="错误信息")
+
+
+@app.post("/tasks/{task_id}/export-obsidian", response_model=ExportObsidianResponse)
+async def export_task_to_obsidian(task_id: str):
+    """将任务总结导出为 Obsidian 笔记文件。"""
+    from datetime import datetime
+    task = db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if not task.get("summary"):
+        raise HTTPException(status_code=400, detail="任务尚无总结内容")
+
+    title = task.get("topic") or task.get("title") or "未命名视频"
+    video_url = task.get("video_url", "")
+    author_name = task.get("author_name", "")
+    author_url = task.get("author_url", "")
+    created_at = task.get("created_at", "")
+    if isinstance(created_at, str):
+        date_str = created_at[:10] if created_at else datetime.now().strftime("%Y-%m-%d")
+    else:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    # 清理文件名中的非法字符
+    safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip()[:80]
+    filename = f"{safe_title}.md"
+    obsidian_inbox = r"D:\study\hxld_obsidian\inbox"
+    file_path = os.path.join(obsidian_inbox, filename)
+
+    # 构建 frontmatter + 内容
+    lines = [
+        "---",
+        f"title: \"{title}\"",
+        f"date: {date_str}",
+        "tags:",
+        "  - 视频总结",
+        "  - AI笔记",
+    ]
+    if video_url:
+        lines.append(f"source: {video_url}")
+    if author_name:
+        lines.append(f"author: \"{author_name}\"")
+    if author_url:
+        lines.append(f"author_url: {author_url}")
+    lines.extend([
+        "type: 视频笔记",
+        "---",
+        "",
+        f"# {title}",
+        "",
+    ])
+    if video_url:
+        lines.append(f"> 来源：[{video_url}]({video_url})")
+    if author_name:
+        author_line = f"[{author_name}]({author_url})" if author_url else author_name
+        lines.append(f"> 作者：{author_line}")
+    if video_url or author_name:
+        lines.append("")
+
+    lines.append(task["summary"])
+
+    try:
+        os.makedirs(obsidian_inbox, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+        logger.info(f"[Obsidian] 已导出: {file_path}")
+        return ExportObsidianResponse(success=True, file_path=file_path)
+    except Exception as e:
+        logger.error(f"[Obsidian] 导出失败: {e}")
+        return ExportObsidianResponse(success=False, error=str(e))
+
 
 @app.post("/tasks/{task_id}/re-summarize", response_model=Task)
 async def re_summarize_task(task_id: str, payload: ReSummarizeRequest | None = None):

@@ -94,6 +94,7 @@ export interface TranscriptionSettings {
   has_bilibili_sessdata: boolean;
   bilibili_cookie_source: string;
   bilibili_sessdata_masked: string;
+  has_bilibili_cookie_string: boolean;
 }
 
 export interface UpdateTranscriptionSettingsRequest {
@@ -104,6 +105,8 @@ export interface UpdateTranscriptionSettingsRequest {
   enable_bilibili_subtitle_fetch?: boolean;
   bilibili_sessdata?: string;
   clear_bilibili_sessdata?: boolean;
+  bilibili_cookie_string?: string;
+  clear_bilibili_cookie_string?: boolean;
 }
 
 export interface SummarizationSettings {

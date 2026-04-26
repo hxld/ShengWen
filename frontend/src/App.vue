@@ -70,6 +70,7 @@ const {
   checkLocalPath,
   scanLocalFolder,
   submitLocalPathTasks,
+  exportToObsidian,
 } = useTaskViewModel()
 
 // 状态变量
@@ -341,6 +342,16 @@ const handleDownloadMarkdown = () => {
 const handleDownloadTxt = () => {
   success('开始下载转录文本...')
   downloadContent('transcript')
+}
+
+const handleExportObsidian = async () => {
+  if (!selectedTask.value) return
+  const result = await exportToObsidian(selectedTask.value.id)
+  if (result.success) {
+    success(`已导出到知识库: ${result.file_path}`)
+  } else {
+    toastError(result.error || '导出到知识库失败')
+  }
 }
 
 const handleTestLlm = async () => {
@@ -806,6 +817,7 @@ watch(
           @downloadTxt="handleDownloadTxt"
           @exportSummaryImage="handleExportSummaryImage"
           @openSummaryImageSettings="handleOpenSummaryImageSettings"
+          @exportObsidian="handleExportObsidian"
           @toggleSidebar="isSidebarOpen = true"
           @jumpHeading="handleJumpHeading"
         />

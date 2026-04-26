@@ -749,6 +749,16 @@ export function useTaskViewModel() {
         return false
       }
     },
+    exportToObsidian: async (taskId: string): Promise<{ success: boolean; file_path?: string; error?: string }> => {
+      try {
+        const response = await axios.post(`${apiBaseUrl}/tasks/${taskId}/export-obsidian`)
+        return response.data
+      } catch (err: any) {
+        const msg = err?.response?.data?.detail || err?.message || '导出失败'
+        console.error('Failed to export to Obsidian:', err)
+        return { success: false, error: msg }
+      }
+    },
     reSummarize: async (taskId: string) => {
       try {
         await axios.post(`${apiBaseUrl}/tasks/${taskId}/re-summarize`, {
