@@ -780,6 +780,7 @@ watch(
       :summarizationSettings="summarizationSettings"
       :isUpdatingSummarizationSettings="isUpdatingSummarizationSettings"
       :isReadingBilibiliCookieFromBrowser="isReadingBilibiliCookieFromBrowser"
+      :tempStats="tempStatsData"
       @close="isSettingsModalOpen = false"
       @updateLlmSettings="handleUpdateLlmSettings"
       @updateLlmSettingsAndTest="handleUpdateLlmSettingsAndTest"
@@ -787,6 +788,8 @@ watch(
       @updateTranscriptionSettings="handleUpdateTranscriptionSettings"
       @readBilibiliCookieFromBrowser="handleReadBilibiliCookieFromBrowser"
       @updateSummarizationSettings="handleUpdateSummarizationSettings"
+      @getTempStats="handleGetTempStats"
+      @cleanupTemp="handleCleanupTemp"
     />
 
     <!-- 遮罩层 (Mobile Only) -->
@@ -814,7 +817,6 @@ watch(
       :isUpdatingTranscriptionSettings="isUpdatingTranscriptionSettings"
       :summarizationSettings="summarizationSettings"
       :isUpdatingSummarizationSettings="isUpdatingSummarizationSettings"
-      :tempStats="tempStatsData"
       @submit="handleSubmit"
       @cancelSubmit="cancelSubmitting"
       @selectTask="handleSelectTask"
@@ -826,8 +828,6 @@ watch(
       @focusSearchMatch="handleFocusSearchMatch"
       @showInfo="(task) => { handleSelectTask(task); showInfoModal = true; }"
       @openSettings="isSettingsModalOpen = true"
-      @getTempStats="handleGetTempStats"
-      @cleanupTemp="handleCleanupTemp"
     />
 
     <!-- 右侧内容区 -->

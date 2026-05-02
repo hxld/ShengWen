@@ -9,6 +9,8 @@ import {
   PhBrain,
   PhMicrophone,
   PhGitBranch,
+  PhHardDrives,
+  PhTrash,
 } from '@phosphor-icons/vue'
 import type { LLMProvider, LLMSettings, TranscriptionSettings, SummarizationSettings } from '../types'
 
@@ -23,6 +25,7 @@ const props = defineProps<{
   summarizationSettings: SummarizationSettings | null
   isUpdatingSummarizationSettings: boolean
   isReadingBilibiliCookieFromBrowser: boolean
+  tempStats: { total_files: number; total_size_mb: number; files_by_date: Record<string, number> } | null
 }>()
 
 const emit = defineEmits<{
@@ -62,9 +65,11 @@ const emit = defineEmits<{
     max_agent_value_chars?: number
     fallback_to_standard_on_agent_error?: boolean
   }]
+  getTempStats: []
+  cleanupTemp: []
 }>()
 
-const settingsTab = ref<'llm' | 'transcription' | 'summarization'>('llm')
+const settingsTab = ref<'llm' | 'transcription' | 'summarization' | 'storage'>('llm')
 
 // LLM 设置
 const llmProvider = ref('')
@@ -246,6 +251,12 @@ const handleSaveSummarizationSettings = () => {
     fallback_to_standard_on_agent_error: fallbackToStandardOnAgentError.value,
   })
 }
+
+watch(settingsTab, (tab) => {
+  if (tab === 'storage') {
+    emit('getTempStats')
+  }
+})
 </script>
 
 <template>
@@ -299,6 +310,19 @@ const handleSaveSummarizationSettings = () => {
               <PhGitBranch :size="18" :weight="settingsTab === 'summarization' ? 'fill' : 'regular'" />
               <span>Agent 设置</span>
             </button>
+
+            <button
+              @click="settingsTab = 'storage'"
+              :class="[
+                'flex items-center gap-2 md:gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap',
+                settingsTab === 'storage'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-slate-600 hover:bg-white/50 hover:text-slate-800'
+              ]"
+            >
+              <PhHardDrives :size="18" :weight="settingsTab === 'storage' ? 'fill' : 'regular'" />
+              <span>存储管理</span>
+            </button>
           </nav>
         </div>
 
@@ -307,7 +331,7 @@ const handleSaveSummarizationSettings = () => {
           <!-- 头部栏 (仅桌面端) -->
           <div class="hidden md:flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
             <h2 class="text-lg font-semibold text-slate-800">
-              {{ settingsTab === 'llm' ? 'LLM 配置' : settingsTab === 'transcription' ? '转录设置' : 'Agent 设置' }}
+              {{ settingsTab === 'llm' ? 'LLM 配置' : settingsTab === 'transcription' ? '转录设置' : settingsTab === 'summarization' ? 'Agent 设置' : '存储管理' }}
             </h2>
             <button
               @click="emit('close')"
@@ -807,6 +831,63 @@ const handleSaveSummarizationSettings = () => {
               <PhSpinner v-if="isUpdatingSummarizationSettings" :size="16" class="animate-spin" />
               <span>{{ isUpdatingSummarizationSettings ? '保存中...' : '保存设置' }}</span>
             </button>
+          </div>
+
+          <!-- 存储管理 -->
+          <div v-if="settingsTab === 'storage'" class="space-y-4">
+            <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+              <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
+                <PhHardDrives :size="18" class="text-blue-500" />
+                <h3 class="text-sm font-semibold text-slate-800">temp 目录统计</h3>
+                <button
+                  @click="emit('getTempStats')"
+                  class="ml-auto text-xs text-blue-600 hover:text-blue-700"
+                >
+                  刷新
+                </button>
+              </div>
+              <div v-if="props.tempStats" class="grid grid-cols-2 gap-4">
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-center">
+                  <p class="text-2xl font-bold text-slate-800">{{ props.tempStats.total_files }}</p>
+                  <p class="text-xs text-slate-500 mt-1">文件数</p>
+                </div>
+                <div class="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-center">
+                  <p class="text-2xl font-bold text-slate-800">{{ props.tempStats.total_size_mb.toFixed(1) }}</p>
+                  <p class="text-xs text-slate-500 mt-1">MB</p>
+                </div>
+              </div>
+              <div v-else class="text-center py-6 text-sm text-slate-400">加载中...</div>
+              <div v-if="props.tempStats?.files_by_date && Object.keys(props.tempStats.files_by_date).length" class="space-y-1.5">
+                <p class="text-xs font-medium text-slate-500">按日期分布</p>
+                <div class="max-h-40 overflow-y-auto custom-scrollbar space-y-1">
+                  <div
+                    v-for="(count, date) in props.tempStats.files_by_date"
+                    :key="date"
+                    class="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-50 text-xs"
+                  >
+                    <span class="text-slate-600">{{ date }}</span>
+                    <span class="text-slate-500">{{ count }} 个文件</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+              <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
+                <PhTrash :size="18" class="text-red-500" />
+                <h3 class="text-sm font-semibold text-slate-800">清理临时文件</h3>
+              </div>
+              <p class="text-xs text-slate-600 leading-relaxed">
+                清理已完成/失败任务的临时文件（音视频、转录文本等）。总结结果保存在数据库中，不受影响。
+              </p>
+              <button
+                @click="emit('cleanupTemp')"
+                class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                <PhTrash :size="16" />
+                清理所有已完成任务文件
+              </button>
+            </div>
           </div>
           </div>
         </div>

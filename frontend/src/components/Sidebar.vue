@@ -56,7 +56,6 @@ const props = defineProps<{
   isUpdatingTranscriptionSettings: boolean
   summarizationSettings: SummarizationSettings | null
   isUpdatingSummarizationSettings: boolean
-  tempStats: { total_files: number; total_size_mb: number; files_by_date: Record<string, number> } | null
 }>()
 
 const emit = defineEmits<{
@@ -99,8 +98,6 @@ const emit = defineEmits<{
     fallback_to_standard_on_agent_error?: boolean
   }]
   startTestLlm: []
-  getTempStats: []
-  cleanupTemp: []
 }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -1423,37 +1420,6 @@ watch(() => props.summarizationSettings, (settings) => {
         <template v-if="sidebarTab === 'theme'">
           <ThemeSelector />
         </template>
-
-        <!-- 存储清理 -->
-        <div class="px-3 pt-2 pb-3 border-t border-gray-100 mt-auto">
-          <div class="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5 space-y-2">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <PhTrash :size="14" class="text-slate-400" />
-                <span class="text-xs font-medium text-slate-600">临时文件</span>
-              </div>
-              <button
-                @click="emit('getTempStats')"
-                class="text-[10px] text-blue-600 hover:text-blue-700"
-              >
-                刷新
-              </button>
-            </div>
-            <div v-if="props.tempStats" class="flex items-center gap-3">
-              <span class="text-[11px] text-slate-500">{{ props.tempStats.total_files }} 个文件</span>
-              <span class="text-[11px] text-slate-500">{{ props.tempStats.total_size_mb.toFixed(1) }} MB</span>
-              <button
-                @click="emit('cleanupTemp')"
-                class="ml-auto text-[11px] text-red-500 hover:text-red-600 font-medium"
-              >
-                清理已完成任务
-              </button>
-            </div>
-            <div v-else class="text-center text-[11px] text-slate-400 py-1">
-              点击刷新查看
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   </aside>
