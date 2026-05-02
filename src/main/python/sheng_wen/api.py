@@ -1718,30 +1718,28 @@ async def get_temp_stats():
 
 
 @app.post("/temp/cleanup", response_model=TempCleanupResult)
-async def cleanup_temp_files(before_date: str = "", task_ids: str = ""):
+async def cleanup_temp_files(before_date: str = ""):
     """
     清理 temp 目录文件。
-    - before_date: 删除此日期之前（含）的文件，格式 YYYY-MM-DD；为空则删除所有已完成任务的文件
+    - before_date: 删除此日期之前（含）的文件，格式 YYYY-MM-DD；为空则删除全部临时文件
     """
     import time as _time
     temp_dir = "temp"
     if not os.path.isdir(temp_dir):
         return TempCleanupResult(success=True)
 
-    # 收集已完成/失败任务的 ID 列表，用于安全删除
-    safe_task_ids: set[str] = set()
-    all_tasks = db.list_tasks()
-    for t in all_tasks:
+    # 收集正在进行的任务关联的文件前缀，避免误删
+    active_prefixes: set[str] = set()
+    for t in db.list_tasks():
         status = t.get("status", "")
-        if status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+        if status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             tid = str(t.get("id", ""))
             if tid:
-                safe_task_ids.add(tid)
-            # 也收集 BV 号前缀（downloader 产生的文件名）
+                active_prefixes.add(tid)
             video_url = str(t.get("video_url") or "")
             bv_match = re.search(r"(BV[0-9A-Za-z]+)", video_url)
             if bv_match:
-                safe_task_ids.add(bv_match.group(1))
+                active_prefixes.add(bv_match.group(1))
 
     cutoff_ts = None
     if before_date:
@@ -1760,14 +1758,13 @@ async def cleanup_temp_files(before_date: str = "", task_ids: str = ""):
             continue
         name = entry.name
 
-        # 判断文件是否属于已完成任务
-        belongs_to_done = False
-        for prefix in safe_task_ids:
+        # 跳过正在进行的任务的文件
+        skip = False
+        for prefix in active_prefixes:
             if name.startswith(prefix):
-                belongs_to_done = True
+                skip = True
                 break
-
-        if not belongs_to_done:
+        if skip:
             continue
 
         # 如果指定了日期，检查文件修改时间
