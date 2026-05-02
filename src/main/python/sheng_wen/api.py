@@ -1101,6 +1101,7 @@ class ExportObsidianResponse(BaseModel):
     success: bool = Field(description="是否导出成功")
     file_path: str = Field(default="", description="导出文件路径")
     error: str = Field(default="", description="错误信息")
+    overwritten: bool = Field(default=False, description="是否覆盖了同名文件")
 
 
 @app.post("/tasks/{task_id}/export-obsidian", response_model=ExportObsidianResponse)
@@ -1163,10 +1164,11 @@ async def export_task_to_obsidian(task_id: str):
 
     try:
         os.makedirs(obsidian_inbox, exist_ok=True)
+        overwritten = os.path.exists(file_path)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
-        logger.info(f"[Obsidian] 已导出: {file_path}")
-        return ExportObsidianResponse(success=True, file_path=file_path)
+        logger.info(f"[Obsidian] 已导出: {file_path}{' (覆盖)' if overwritten else ''}")
+        return ExportObsidianResponse(success=True, file_path=file_path, overwritten=overwritten)
     except Exception as e:
         logger.error(f"[Obsidian] 导出失败: {e}")
         return ExportObsidianResponse(success=False, error=str(e))
@@ -1671,6 +1673,120 @@ async def update_summarization_settings(payload: SummarizationSettingsUpdate):
         return await get_summarization_settings()
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+class TempCleanupStats(BaseModel):
+    total_files: int = Field(description="temp 目录文件总数")
+    total_size_mb: float = Field(description="总大小（MB）")
+    files_by_date: dict[str, int] = Field(description="按日期分组的文件数")
+
+
+class TempCleanupResult(BaseModel):
+    success: bool
+    deleted_files: int = 0
+    freed_size_mb: float = 0.0
+    error: str = ""
+
+
+@app.get("/temp/stats", response_model=TempCleanupStats)
+async def get_temp_stats():
+    """获取 temp 目录的文件统计信息。"""
+    import time as _time
+    temp_dir = "temp"
+    if not os.path.isdir(temp_dir):
+        return TempCleanupStats(total_files=0, total_size_mb=0.0, files_by_date={})
+
+    total_files = 0
+    total_size = 0
+    files_by_date: dict[str, int] = {}
+
+    for entry in os.scandir(temp_dir):
+        if not entry.is_file():
+            continue
+        total_files += 1
+        total_size += entry.stat().st_size
+        mtime = _time.localtime(entry.stat().st_mtime)
+        date_key = _time.strftime("%Y-%m-%d", mtime)
+        files_by_date[date_key] = files_by_date.get(date_key, 0) + 1
+
+    return TempCleanupStats(
+        total_files=total_files,
+        total_size_mb=round(total_size / (1024 * 1024), 2),
+        files_by_date=dict(sorted(files_by_date.items())),
+    )
+
+
+@app.post("/temp/cleanup", response_model=TempCleanupResult)
+async def cleanup_temp_files(before_date: str = "", task_ids: str = ""):
+    """
+    清理 temp 目录文件。
+    - before_date: 删除此日期之前（含）的文件，格式 YYYY-MM-DD；为空则删除所有已完成任务的文件
+    """
+    import time as _time
+    temp_dir = "temp"
+    if not os.path.isdir(temp_dir):
+        return TempCleanupResult(success=True)
+
+    # 收集已完成/失败任务的 ID 列表，用于安全删除
+    safe_task_ids: set[str] = set()
+    all_tasks = db.list_tasks(limit=99999)
+    for t in all_tasks:
+        status = t.get("status", "")
+        if status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+            tid = str(t.get("id", ""))
+            if tid:
+                safe_task_ids.add(tid)
+            # 也收集 BV 号前缀（downloader 产生的文件名）
+            video_url = str(t.get("video_url") or "")
+            bv_match = re.search(r"(BV[0-9A-Za-z]+)", video_url)
+            if bv_match:
+                safe_task_ids.add(bv_match.group(1))
+
+    cutoff_ts = None
+    if before_date:
+        try:
+            from datetime import datetime as _dt
+            cutoff_dt = _dt.strptime(before_date, "%Y-%m-%d")
+            cutoff_ts = _dt(cutoff_dt.year, cutoff_dt.month, cutoff_dt.day, 23, 59, 59).timestamp()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="日期格式无效，请使用 YYYY-MM-DD")
+
+    deleted_files = 0
+    freed_size = 0
+
+    for entry in os.scandir(temp_dir):
+        if not entry.is_file():
+            continue
+        name = entry.name
+
+        # 判断文件是否属于已完成任务
+        belongs_to_done = False
+        for prefix in safe_task_ids:
+            if name.startswith(prefix):
+                belongs_to_done = True
+                break
+
+        if not belongs_to_done:
+            continue
+
+        # 如果指定了日期，检查文件修改时间
+        if cutoff_ts is not None:
+            if entry.stat().st_mtime > cutoff_ts:
+                continue
+
+        try:
+            freed_size += entry.stat().st_size
+            os.remove(entry.path)
+            deleted_files += 1
+        except OSError:
+            pass
+
+    logger.info(f"[Temp] 清理完成: 删除 {deleted_files} 个文件, 释放 {freed_size / (1024*1024):.2f} MB")
+    return TempCleanupResult(
+        success=True,
+        deleted_files=deleted_files,
+        freed_size_mb=round(freed_size / (1024 * 1024), 2),
+    )
 
 
 @app.websocket("/ws")

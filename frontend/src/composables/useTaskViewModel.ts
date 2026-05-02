@@ -794,6 +794,21 @@ export function useTaskViewModel() {
         error.value = '更新主题失败'
         throw err
       }
+    },
+    getTempStats: async (): Promise<{ total_files: number; total_size_mb: number; files_by_date: Record<string, number> }> => {
+      const response = await axios.get(`${apiBaseUrl}/temp/stats`)
+      return response.data
+    },
+    cleanupTemp: async (beforeDate?: string): Promise<{ success: boolean; deleted_files: number; freed_size_mb: number; error?: string }> => {
+      try {
+        const params: Record<string, string> = {}
+        if (beforeDate) params.before_date = beforeDate
+        const response = await axios.post(`${apiBaseUrl}/temp/cleanup`, null, { params })
+        return response.data
+      } catch (err: any) {
+        const msg = err?.response?.data?.detail || err?.message || '清理失败'
+        return { success: false, deleted_files: 0, freed_size_mb: 0, error: msg }
+      }
     }
   }
 }

@@ -71,6 +71,8 @@ const {
   scanLocalFolder,
   submitLocalPathTasks,
   exportToObsidian,
+  getTempStats,
+  cleanupTemp,
 } = useTaskViewModel()
 
 // 状态变量
@@ -79,6 +81,7 @@ const isSettingsModalOpen = ref(false)
 const isEditingTopic = ref(false)
 const editingTopicValue = ref('')
 const isTestingLlm = ref(false)
+const tempStatsData = ref<{ total_files: number; total_size_mb: number; files_by_date: Record<string, number> } | null>(null)
 const summaryHighlightRequest = ref<{
   taskId: string
   keyword: string
@@ -348,9 +351,35 @@ const handleExportObsidian = async () => {
   if (!selectedTask.value) return
   const result = await exportToObsidian(selectedTask.value.id)
   if (result.success) {
-    success(`已导出到知识库: ${result.file_path}`)
+    success('overwritten' in result && result.overwritten
+      ? `已覆盖同名文件并导出到知识库`
+      : `已导出到知识库: ${result.file_path}`)
   } else {
     toastError(result.error || '导出到知识库失败')
+  }
+}
+
+const handleGetTempStats = async () => {
+  try {
+    tempStatsData.value = await getTempStats()
+  } catch (err) {
+    console.error('Failed to get temp stats:', err)
+  }
+}
+
+const handleCleanupTemp = async (beforeDate?: string) => {
+  try {
+    const result = await cleanupTemp(beforeDate)
+    if (result.success) {
+      success(`清理完成：删除 ${result.deleted_files} 个文件，释放 ${result.freed_size_mb.toFixed(1)} MB`)
+      tempStatsData.value = await getTempStats()
+    } else {
+      toastError(result.error || '清理失败')
+    }
+  } catch (err) {
+    toastError('清理失败')
+  } finally {
+    // Reset loading state in Sidebar
   }
 }
 
@@ -786,6 +815,7 @@ watch(
       :isUpdatingTranscriptionSettings="isUpdatingTranscriptionSettings"
       :summarizationSettings="summarizationSettings"
       :isUpdatingSummarizationSettings="isUpdatingSummarizationSettings"
+      :tempStats="tempStatsData"
       @submit="handleSubmit"
       @cancelSubmit="cancelSubmitting"
       @selectTask="handleSelectTask"
@@ -797,6 +827,8 @@ watch(
       @focusSearchMatch="handleFocusSearchMatch"
       @showInfo="(task) => { handleSelectTask(task); showInfoModal = true; }"
       @openSettings="isSettingsModalOpen = true"
+      @getTempStats="handleGetTempStats"
+      @cleanupTemp="handleCleanupTemp"
     />
 
     <!-- 右侧内容区 -->
