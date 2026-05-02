@@ -1,4 +1,5 @@
 import os
+import re
 import asyncio
 import json
 import glob
@@ -1729,10 +1730,10 @@ async def cleanup_temp_files(before_date: str = "", task_ids: str = ""):
 
     # 收集已完成/失败任务的 ID 列表，用于安全删除
     safe_task_ids: set[str] = set()
-    all_tasks = db.list_tasks(limit=99999)
+    all_tasks = db.list_tasks()
     for t in all_tasks:
         status = t.get("status", "")
-        if status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+        if status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
             tid = str(t.get("id", ""))
             if tid:
                 safe_task_ids.add(tid)
