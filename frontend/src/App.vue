@@ -367,9 +367,10 @@ const handleGetTempStats = async () => {
   }
 }
 
-const handleCleanupTemp = async (beforeDate?: string) => {
+const handleCleanupTemp = async () => {
+  if (!confirm('确定要清理所有已完成任务的临时文件吗？总结结果不受影响。')) return
   try {
-    const result = await cleanupTemp(beforeDate)
+    const result = await cleanupTemp()
     if (result.success) {
       success(`清理完成：删除 ${result.deleted_files} 个文件，释放 ${result.freed_size_mb.toFixed(1)} MB`)
       tempStatsData.value = await getTempStats()
@@ -378,8 +379,6 @@ const handleCleanupTemp = async (beforeDate?: string) => {
     }
   } catch (err) {
     toastError('清理失败')
-  } finally {
-    // Reset loading state in Sidebar
   }
 }
 

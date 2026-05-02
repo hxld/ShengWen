@@ -24,8 +24,6 @@ import {
   PhBrain,
   PhFile,
   PhQuestion,
-  PhHardDrives,
-  PhBroom,
 } from '@phosphor-icons/vue'
 import {
   TaskStatus,
@@ -102,25 +100,14 @@ const emit = defineEmits<{
   }]
   startTestLlm: []
   getTempStats: []
-  cleanupTemp: [beforeDate?: string]
+  cleanupTemp: []
 }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const isSettingsPanelOpen = ref(false)
-const settingsTab = ref<'llm' | 'transcription' | 'summarization' | 'storage'>('llm')
+const settingsTab = ref<'llm' | 'transcription' | 'summarization'>('llm')
 const sidebarTab = ref<'quick' | 'manage' | 'theme'>('quick')
 const showLocalPathHelp = ref(false)
-
-const tempStats = ref<{ total_files: number; total_size_mb: number; files_by_date: Record<string, number> } | null>(null)
-const tempCleanupLoading = ref(false)
-const tempCleanupBeforeDate = ref('')
-
-watch(() => props.tempStats, (val) => {
-  if (val) {
-    tempStats.value = val
-    tempCleanupLoading.value = false
-  }
-})
 
 const llmProvider = ref('')
 const llmBaseUrl = ref('')
@@ -420,24 +407,6 @@ const handleTestLlm = async () => {
   }
 }
 
-const loadTempStats = async () => {
-  emit('getTempStats')
-}
-
-const handleCleanupTemp = async () => {
-  const before = tempCleanupBeforeDate.value || undefined
-  const label = before ? `${before} 之前` : '所有已完成任务'
-  if (!confirm(`确定要清理 ${label} 的临时文件吗？`)) return
-  tempCleanupLoading.value = true
-  emit('cleanupTemp', before)
-}
-
-watch(settingsTab, (tab) => {
-  if (tab === 'storage') {
-    loadTempStats()
-  }
-})
-
 const getStatusLabel = (status: TaskStatus) => {
   switch (status) {
     case TaskStatus.COMPLETED: return '完成'
@@ -703,9 +672,8 @@ watch(() => props.summarizationSettings, (settings) => {
 
             <div class="flex items-center gap-1">
               <button
-                @click="isSettingsPanelOpen = !isSettingsPanelOpen"
+                @click="emit('openSettings')"
                 class="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors flex items-center justify-center"
-                :class="{ 'text-blue-600 border-blue-200 bg-blue-50': isSettingsPanelOpen }"
                 title="设置"
               >
                 <PhGearSix :size="16" />
@@ -721,7 +689,7 @@ watch(() => props.summarizationSettings, (settings) => {
               v-if="isSettingsPanelOpen"
               class="mx-4 mt-3 rounded-2xl border border-gray-100 bg-white shadow-lg p-3 max-h-[52dvh] overflow-y-auto relative z-20 md:absolute md:top-[72px] md:left-4 md:right-4 md:mx-0 md:mt-0 md:max-h-[70dvh] md:z-30"
             >
-              <div class="grid grid-cols-4 gap-1 p-1 bg-slate-100 rounded-xl mb-3">
+              <div class="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl mb-3">
                 <button
                   @click="settingsTab = 'llm'"
                   :class="[
@@ -748,15 +716,6 @@ watch(() => props.summarizationSettings, (settings) => {
                   ]"
                 >
                   Agent
-                </button>
-                <button
-                  @click="settingsTab = 'storage'"
-                  :class="[
-                    'py-1.5 text-xs font-medium rounded-lg transition-colors',
-                    settingsTab === 'storage' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                  ]"
-                >
-                  存储
                 </button>
               </div>
 
@@ -1034,7 +993,7 @@ watch(() => props.summarizationSettings, (settings) => {
                 </button>
               </div>
 
-              <div v-else-if="settingsTab === 'summarization'" class="space-y-3">
+              <div v-else class="space-y-3">
                 <div class="rounded-xl border border-blue-100 bg-blue-50/60 px-3 py-3">
                   <p class="text-sm font-semibold text-slate-800">Agent 分块怎么调</p>
                   <p class="mt-1 text-[12px] text-slate-600 leading-relaxed">
@@ -1164,58 +1123,6 @@ watch(() => props.summarizationSettings, (settings) => {
                   <span v-if="props.isUpdatingSummarizationSettings">保存中...</span>
                   <span v-else>保存 Agent 配置</span>
                 </button>
-              </div>
-
-              <div v-else-if="settingsTab === 'storage'" class="space-y-3">
-                <div class="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-3 space-y-2">
-                  <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                      <PhHardDrives :size="18" class="text-slate-500" />
-                      <span class="text-sm font-medium text-slate-700">temp 目录</span>
-                    </div>
-                    <button
-                      @click="loadTempStats"
-                      class="text-[11px] text-blue-600 hover:text-blue-700"
-                    >
-                      刷新
-                    </button>
-                  </div>
-                  <div v-if="props.tempStats" class="grid grid-cols-2 gap-2">
-                    <div class="bg-white rounded-lg border border-gray-100 px-2.5 py-2 text-center">
-                      <p class="text-lg font-semibold text-slate-800">{{ props.tempStats.total_files }}</p>
-                      <p class="text-[10px] text-slate-500">文件数</p>
-                    </div>
-                    <div class="bg-white rounded-lg border border-gray-100 px-2.5 py-2 text-center">
-                      <p class="text-lg font-semibold text-slate-800">{{ props.tempStats.total_size_mb.toFixed(1) }}</p>
-                      <p class="text-[10px] text-slate-500">MB</p>
-                    </div>
-                  </div>
-                  <div v-else class="text-center py-3 text-xs text-slate-400">加载中...</div>
-                </div>
-
-                <div class="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-3 space-y-2.5">
-                  <p class="text-sm font-medium text-slate-700">按日期清理</p>
-                  <p class="text-[11px] text-slate-500 leading-relaxed">
-                    删除指定日期之前（含）已完成任务的临时文件（音视频、转录文本等）。总结结果不受影响。
-                  </p>
-                  <label class="space-y-1">
-                    <span class="text-[11px] text-slate-500">截止日期（留空则清理所有已完成任务文件）</span>
-                    <input
-                      v-model="tempCleanupBeforeDate"
-                      type="date"
-                      class="w-full px-2.5 py-2 bg-white border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                    >
-                  </label>
-                  <button
-                    @click="handleCleanupTemp"
-                    :disabled="tempCleanupLoading"
-                    class="w-full flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <PhBroom :size="16" />
-                    <span v-if="tempCleanupLoading">清理中...</span>
-                    <span v-else>{{ tempCleanupBeforeDate ? `清理 ${tempCleanupBeforeDate} 之前的文件` : '清理所有已完成任务文件' }}</span>
-                  </button>
-                </div>
               </div>
             </div>
           </Transition>
@@ -1516,6 +1423,37 @@ watch(() => props.summarizationSettings, (settings) => {
         <template v-if="sidebarTab === 'theme'">
           <ThemeSelector />
         </template>
+
+        <!-- 存储清理 -->
+        <div class="px-3 pt-2 pb-3 border-t border-gray-100 mt-auto">
+          <div class="rounded-xl border border-gray-200 bg-gray-50/60 px-3 py-2.5 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <PhTrash :size="14" class="text-slate-400" />
+                <span class="text-xs font-medium text-slate-600">临时文件</span>
+              </div>
+              <button
+                @click="emit('getTempStats')"
+                class="text-[10px] text-blue-600 hover:text-blue-700"
+              >
+                刷新
+              </button>
+            </div>
+            <div v-if="props.tempStats" class="flex items-center gap-3">
+              <span class="text-[11px] text-slate-500">{{ props.tempStats.total_files }} 个文件</span>
+              <span class="text-[11px] text-slate-500">{{ props.tempStats.total_size_mb.toFixed(1) }} MB</span>
+              <button
+                @click="emit('cleanupTemp')"
+                class="ml-auto text-[11px] text-red-500 hover:text-red-600 font-medium"
+              >
+                清理已完成任务
+              </button>
+            </div>
+            <div v-else class="text-center text-[11px] text-slate-400 py-1">
+              点击刷新查看
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </aside>
