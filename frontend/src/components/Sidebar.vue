@@ -703,8 +703,9 @@ watch(() => props.summarizationSettings, (settings) => {
 
             <div class="flex items-center gap-1">
               <button
-                @click="emit('openSettings')"
+                @click="isSettingsPanelOpen = !isSettingsPanelOpen"
                 class="w-8 h-8 rounded-lg border border-slate-200 bg-white text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 transition-colors flex items-center justify-center"
+                :class="{ 'text-blue-600 border-blue-200 bg-blue-50': isSettingsPanelOpen }"
                 title="设置"
               >
                 <PhGearSix :size="16" />
