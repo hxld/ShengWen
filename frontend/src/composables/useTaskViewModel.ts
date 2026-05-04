@@ -7,6 +7,7 @@ import type {
   LLMProvider,
   LLMSettings,
   UpdateLLMSettingsRequest,
+  LLMPreset,
   TranscriptionSettings,
   UpdateTranscriptionSettingsRequest,
   SummarizationSettings,
@@ -147,6 +148,7 @@ export function useTaskViewModel() {
   const llmProviders = ref<LLMProvider[]>([])
   const llmSettings = ref<LLMSettings | null>(null)
   const isUpdatingLlmSettings = ref(false)
+  const llmPresets = ref<LLMPreset[]>([])
   const transcriptionSettings = ref<TranscriptionSettings | null>(null)
   const isUpdatingTranscriptionSettings = ref(false)
   const summarizationSettings = ref<SummarizationSettings | null>(null)
@@ -430,6 +432,66 @@ export function useTaskViewModel() {
     }
   }
 
+  // --- LLM 预设 ---
+  const fetchLlmPresets = async () => {
+    try {
+      const response = await axios.get(`${apiBaseUrl}/llm/presets`)
+      llmPresets.value = response.data
+    } catch (err) {
+      console.error('Failed to fetch LLM presets:', err)
+    }
+  }
+
+  const saveLlmPreset = async (preset: LLMPreset) => {
+    try {
+      const response = await axios.post(`${apiBaseUrl}/llm/presets`, preset)
+      await fetchLlmPresets()
+      return response.data
+    } catch (err) {
+      console.error('Failed to save LLM preset:', err)
+      if (axios.isAxiosError(err) && err.response) {
+        error.value = err.response.data?.detail || '保存预设失败'
+      } else {
+        error.value = '保存预设失败'
+      }
+      throw err
+    }
+  }
+
+  const deleteLlmPreset = async (name: string) => {
+    try {
+      await axios.delete(`${apiBaseUrl}/llm/presets/${encodeURIComponent(name)}`)
+      await fetchLlmPresets()
+    } catch (err) {
+      console.error('Failed to delete LLM preset:', err)
+      if (axios.isAxiosError(err) && err.response) {
+        error.value = err.response.data?.detail || '删除预设失败'
+      } else {
+        error.value = '删除预设失败'
+      }
+      throw err
+    }
+  }
+
+  const activateLlmPreset = async (name: string) => {
+    isUpdatingLlmSettings.value = true
+    try {
+      const response = await axios.put(`${apiBaseUrl}/llm/presets/${encodeURIComponent(name)}/activate`)
+      llmSettings.value = response.data
+      return response.data as LLMSettings
+    } catch (err) {
+      console.error('Failed to activate LLM preset:', err)
+      if (axios.isAxiosError(err) && err.response) {
+        error.value = err.response.data?.detail || '切换预设失败'
+      } else {
+        error.value = '切换预设失败'
+      }
+      throw err
+    } finally {
+      isUpdatingLlmSettings.value = false
+    }
+  }
+
   const fetchTranscriptionSettings = async () => {
     try {
       const response = await axios.get(`${apiBaseUrl}/transcription/settings`)
@@ -642,6 +704,7 @@ export function useTaskViewModel() {
     fetchTasks()
     fetchLlmProviders()
     fetchLlmSettings()
+    fetchLlmPresets()
     fetchTranscriptionSettings()
     fetchSummarizationSettings()
     connectWebSocket()
@@ -670,6 +733,7 @@ export function useTaskViewModel() {
     llmProviders,
     llmSettings,
     isUpdatingLlmSettings,
+    llmPresets,
     transcriptionSettings,
     isUpdatingTranscriptionSettings,
     summarizationSettings,
@@ -686,6 +750,10 @@ export function useTaskViewModel() {
     fetchLlmProviders,
     fetchLlmSettings,
     updateLlmSettings,
+    fetchLlmPresets,
+    saveLlmPreset,
+    deleteLlmPreset,
+    activateLlmPreset,
     fetchTranscriptionSettings,
     updateTranscriptionSettings,
     fetchSummarizationSettings,

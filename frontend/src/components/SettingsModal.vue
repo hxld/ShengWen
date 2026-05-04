@@ -11,8 +11,10 @@ import {
   PhGitBranch,
   PhHardDrives,
   PhTrash,
+  PhPlus,
+  PhSwatches,
 } from '@phosphor-icons/vue'
-import type { LLMProvider, LLMSettings, TranscriptionSettings, SummarizationSettings } from '../types'
+import type { LLMProvider, LLMSettings, LLMPreset, TranscriptionSettings, SummarizationSettings } from '../types'
 
 const props = defineProps<{
   isOpen: boolean
@@ -20,6 +22,7 @@ const props = defineProps<{
   llmSettings: LLMSettings | null
   isUpdatingLlmSettings: boolean
   isTestingLlm: boolean
+  llmPresets: LLMPreset[]
   transcriptionSettings: TranscriptionSettings | null
   isUpdatingTranscriptionSettings: boolean
   summarizationSettings: SummarizationSettings | null
@@ -45,6 +48,9 @@ const emit = defineEmits<{
     model_id?: string
     temperature?: number
   }]
+  saveLlmPreset: [payload: { name: string; provider: string; base_url: string; api_key?: string; model_id: string; temperature: number; context_window_size: number }]
+  deleteLlmPreset: [name: string]
+  activateLlmPreset: [name: string]
   updateTranscriptionSettings: [payload: {
     device?: 'cpu' | 'cuda'
     model_source?: 'auto_download' | 'manual_path'
@@ -77,6 +83,8 @@ const llmBaseUrl = ref('')
 const llmModelId = ref('')
 const llmTemperature = ref(0.7)
 const llmApiKey = ref('')
+const llmPresetName = ref('')
+const showSavePresetInput = ref(false)
 
 // 转录设置
 const transcriptionDevice = ref<'cpu' | 'cuda'>('cpu')
@@ -204,6 +212,29 @@ const handleTestLlm = () => {
 
   // 清空 API Key 输入框
   llmApiKey.value = ''
+}
+
+const handleSavePreset = () => {
+  const name = llmPresetName.value.trim()
+  if (!name) return
+  emit('saveLlmPreset', {
+    name,
+    provider: llmProvider.value,
+    base_url: llmBaseUrl.value.trim(),
+    model_id: llmModelId.value.trim(),
+    temperature: llmTemperature.value,
+    context_window_size: props.llmSettings?.context_window_size ?? 1000000,
+  })
+  llmPresetName.value = ''
+  showSavePresetInput.value = false
+}
+
+const handleDeletePreset = (name: string) => {
+  emit('deleteLlmPreset', name)
+}
+
+const handleActivatePreset = (preset: LLMPreset) => {
+  emit('activateLlmPreset', preset.name)
 }
 
 const handleSaveTranscriptionSettings = () => {
@@ -344,6 +375,79 @@ watch(settingsTab, (tab) => {
           <div class="flex-1 overflow-y-auto px-4 md:px-6 py-4 md:py-6 custom-scrollbar min-h-0">
             <!-- LLM 设置 -->
             <div v-if="settingsTab === 'llm'" class="space-y-4">
+              <!-- 配置预设 -->
+              <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+                <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
+                  <PhSwatches :size="18" class="text-blue-500" />
+                  <h3 class="text-sm font-semibold text-slate-800">配置预设</h3>
+                </div>
+
+                <div v-if="llmPresets.length > 0" class="space-y-2">
+                  <div
+                    v-for="preset in llmPresets"
+                    :key="preset.name"
+                    class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 transition-colors"
+                  >
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-medium text-slate-700 truncate">{{ preset.name }}</p>
+                      <p class="text-xs text-slate-500 truncate">{{ preset.provider }} · {{ preset.model_id }}</p>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <button
+                        @click="handleActivatePreset(preset)"
+                        :disabled="isTestingLlm || isUpdatingLlmSettings"
+                        class="p-1.5 text-blue-500 hover:bg-blue-100 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="切换到此预设"
+                      >
+                        <PhCpu :size="16" />
+                      </button>
+                      <button
+                        @click="handleDeletePreset(preset.name)"
+                        :disabled="isTestingLlm || isUpdatingLlmSettings"
+                        class="p-1.5 text-red-400 hover:bg-red-100 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="删除预设"
+                      >
+                        <PhTrash :size="16" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p v-else class="text-xs text-slate-400 text-center py-2">暂无保存的预设</p>
+
+                <!-- 保存当前配置为预设 -->
+                <div v-if="showSavePresetInput" class="flex gap-2">
+                  <input
+                    v-model="llmPresetName"
+                    type="text"
+                    placeholder="输入预设名称"
+                    class="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    @keyup.enter="handleSavePreset"
+                  >
+                  <button
+                    @click="handleSavePreset"
+                    :disabled="!llmPresetName.trim()"
+                    class="px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    保存
+                  </button>
+                  <button
+                    @click="showSavePresetInput = false; llmPresetName = ''"
+                    class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-sm transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+                <button
+                  v-else
+                  @click="showSavePresetInput = true"
+                  :disabled="isTestingLlm || isUpdatingLlmSettings"
+                  class="w-full flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-300 rounded-lg text-sm text-slate-500 hover:border-blue-400 hover:text-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PhPlus :size="16" />
+                  <span>保存当前配置为预设</span>
+                </button>
+              </div>
+
               <!-- 基础配置 -->
               <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
                 <div class="flex items-center gap-2 pb-2 border-b border-slate-100">

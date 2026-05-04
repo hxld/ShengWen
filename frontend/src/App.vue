@@ -44,6 +44,7 @@ const {
   llmProviders,
   llmSettings,
   isUpdatingLlmSettings,
+  llmPresets,
   transcriptionSettings,
   isUpdatingTranscriptionSettings,
   summarizationSettings,
@@ -60,6 +61,9 @@ const {
   reTranscribe,
   updateTaskTopic,
   updateLlmSettings,
+  saveLlmPreset,
+  deleteLlmPreset,
+  activateLlmPreset,
   updateTranscriptionSettings,
   updateSummarizationSettings,
   testLlm,
@@ -465,6 +469,33 @@ const handleUpdateLlmSettingsAndTest = async (payload: {
   }
 }
 
+const handleSaveLlmPreset = async (preset: { name: string; provider: string; base_url: string; api_key?: string; model_id: string; temperature: number; context_window_size: number }) => {
+  try {
+    await saveLlmPreset(preset)
+    success(`预设 "${preset.name}" 已保存`)
+  } catch (_e) {
+    // handled by toast
+  }
+}
+
+const handleDeleteLlmPreset = async (name: string) => {
+  try {
+    await deleteLlmPreset(name)
+    success(`预设 "${name}" 已删除`)
+  } catch (_e) {
+    // handled by toast
+  }
+}
+
+const handleActivateLlmPreset = async (name: string) => {
+  try {
+    await activateLlmPreset(name)
+    success(`已切换到预设 "${name}"`)
+  } catch (_e) {
+    // handled by toast
+  }
+}
+
 const handleUpdateTranscriptionSettings = async (payload: {
   device?: 'cpu' | 'cuda'
   model_source?: 'auto_download' | 'manual_path'
@@ -775,6 +806,7 @@ watch(
       :llmSettings="llmSettings"
       :isUpdatingLlmSettings="isUpdatingLlmSettings"
       :isTestingLlm="isTestingLlm"
+      :llmPresets="llmPresets"
       :transcriptionSettings="transcriptionSettings"
       :isUpdatingTranscriptionSettings="isUpdatingTranscriptionSettings"
       :summarizationSettings="summarizationSettings"
@@ -785,6 +817,9 @@ watch(
       @updateLlmSettings="handleUpdateLlmSettings"
       @updateLlmSettingsAndTest="handleUpdateLlmSettingsAndTest"
       @testLlm="handleTestLlm"
+      @saveLlmPreset="handleSaveLlmPreset"
+      @deleteLlmPreset="handleDeleteLlmPreset"
+      @activateLlmPreset="handleActivateLlmPreset"
       @updateTranscriptionSettings="handleUpdateTranscriptionSettings"
       @readBilibiliCookieFromBrowser="handleReadBilibiliCookieFromBrowser"
       @updateSummarizationSettings="handleUpdateSummarizationSettings"

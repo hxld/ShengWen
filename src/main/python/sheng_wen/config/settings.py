@@ -289,6 +289,67 @@ class JSONConfigManager:
         }
         self.update_section("llm", llm_patch)
 
+    # --- LLM 预设管理 ---
+
+    def list_llm_presets(self) -> list[dict[str, Any]]:
+        with self._lock:
+            presets = self._config.get("llm_presets")
+            if not isinstance(presets, list):
+                return []
+            return copy.deepcopy(presets)
+
+    def save_llm_preset(self, preset: dict[str, Any]) -> dict[str, Any]:
+        name = str(preset.get("name") or "").strip()
+        if not name:
+            raise ValueError("预设名称不能为空")
+        entry = {
+            "name": name,
+            "provider": str(preset.get("provider") or "openai_compatible"),
+            "base_url": str(preset.get("base_url") or ""),
+            "api_key": str(preset.get("api_key") or ""),
+            "model_id": str(preset.get("model_id") or ""),
+            "temperature": float(preset.get("temperature", 0.7)),
+            "context_window_size": int(preset.get("context_window_size", 1000000)),
+        }
+        with self._lock:
+            presets = self._config.get("llm_presets")
+            if not isinstance(presets, list):
+                presets = []
+            for i, p in enumerate(presets):
+                if isinstance(p, dict) and p.get("name") == name:
+                    presets[i] = entry
+                    break
+            else:
+                presets.append(entry)
+            self._config["llm_presets"] = presets
+            self._write_locked()
+        return entry
+
+    def delete_llm_preset(self, name: str) -> bool:
+        with self._lock:
+            presets = self._config.get("llm_presets")
+            if not isinstance(presets, list):
+                return False
+            new_presets = [p for p in presets if not (isinstance(p, dict) and p.get("name") == name)]
+            if len(new_presets) == len(presets):
+                return False
+            self._config["llm_presets"] = new_presets
+            self._write_locked()
+        return True
+
+    def activate_llm_preset(self, name: str) -> dict[str, Any] | None:
+        with self._lock:
+            presets = self._config.get("llm_presets")
+            if not isinstance(presets, list):
+                return None
+            for p in presets:
+                if isinstance(p, dict) and p.get("name") == name:
+                    llm_patch = {k: p[k] for k in ("provider", "base_url", "api_key", "model_id", "temperature", "context_window_size") if k in p}
+                    self._config["llm"] = _deep_merge(self._config.get("llm", {}), llm_patch)
+                    self._write_locked()
+                    return copy.deepcopy(llm_patch)
+        return None
+
     def save_transcription_config(self, payload: dict[str, Any]):
         whisper_patch = {}
         resolved_model_source = None

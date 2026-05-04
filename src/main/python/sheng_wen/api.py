@@ -1522,7 +1522,56 @@ async def test_llm_connection():
         )
 
 
-@app.get("/transcription/settings", response_model=TranscriptionSettings)
+class LLMPresetPayload(BaseModel):
+    name: str
+    provider: str = "openai_compatible"
+    base_url: str = ""
+    api_key: Optional[str] = None
+    model_id: str = ""
+    temperature: float = 0.7
+    context_window_size: int = 1000000
+
+
+@app.get("/llm/presets")
+async def list_llm_presets():
+    return config_manager.list_llm_presets()
+
+
+@app.post("/llm/presets")
+async def save_llm_preset(payload: LLMPresetPayload):
+    preset_dict = payload.model_dump()
+    try:
+        return config_manager.save_llm_preset(preset_dict)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/llm/presets/{name}")
+async def delete_llm_preset(name: str):
+    ok = config_manager.delete_llm_preset(name)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"预设 '{name}' 不存在")
+    return {"ok": True}
+
+
+@app.put("/llm/presets/{name}/activate")
+async def activate_llm_preset(name: str):
+    llm_patch = config_manager.activate_llm_preset(name)
+    if llm_patch is None:
+        raise HTTPException(status_code=404, detail=f"预设 '{name}' 不存在")
+    settings = llm_provider_manager.update_settings(
+        provider=llm_patch.get("provider", "openai_compatible"),
+        base_url=llm_patch.get("base_url"),
+        api_key=llm_patch.get("api_key"),
+        model_id=llm_patch.get("model_id"),
+        temperature=llm_patch.get("temperature"),
+        context_window_size=llm_patch.get("context_window_size"),
+    )
+    config_manager.save_llm_config(llm_provider_manager.export_runtime_config())
+    return settings
+
+
+
 async def get_transcription_settings():
     """获取当前转录运行时设置。"""
     return transcription_settings_manager.get_settings()

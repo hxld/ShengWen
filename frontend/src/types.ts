@@ -72,6 +72,16 @@ export interface UpdateLLMSettingsRequest {
   context_window_size?: number;
 }
 
+export interface LLMPreset {
+  name: string;
+  provider: string;
+  base_url: string;
+  api_key?: string;
+  model_id: string;
+  temperature: number;
+  context_window_size: number;
+}
+
 export interface TranscriptionSettings {
   device: "cpu" | "cuda";
   model_source: "auto_download" | "manual_path";
