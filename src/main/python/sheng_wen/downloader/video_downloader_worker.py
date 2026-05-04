@@ -691,6 +691,23 @@ class VideoDownloaderWorker(Worker):
                 info_dict = ydl.extract_info(video_url, download=True)
                 video_path = ydl.prepare_filename(info_dict)
 
+            if not os.path.exists(video_path):
+                entries = info_dict.get("entries")
+                if isinstance(entries, list) and entries:
+                    for entry in entries:
+                        if not isinstance(entry, dict):
+                            continue
+                        candidate = entry.get("_filename") or entry.get("requested_downloads", [{}])[0].get("filepath") if entry.get("requested_downloads") else None
+                        if candidate and os.path.exists(candidate):
+                            video_path = candidate
+                            break
+                    else:
+                        base_id = info_dict.get("id") or ""
+                        for f in sorted(os.listdir(self.output_dir)):
+                            if base_id and base_id in f and os.path.splitext(f)[1].lower() in (".mp4", ".mkv", ".webm", ".mp3", ".m4a"):
+                                video_path = os.path.join(self.output_dir, f)
+                                break
+
             logger.info(f"[{self.name}] 视频下载成功: {video_path}")
 
             if task_id and self.is_task_cancelled(task_id):
