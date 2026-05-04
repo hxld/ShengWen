@@ -77,6 +77,8 @@ const {
   exportToObsidian,
   getTempStats,
   cleanupTemp,
+  batchReSummarize,
+  batchExportObsidian,
 } = useTaskViewModel()
 
 // 状态变量
@@ -383,6 +385,39 @@ const handleCleanupTemp = async () => {
     }
   } catch (err) {
     toastError('清理失败')
+  }
+}
+
+const isBatchReSummarizing = ref(false)
+const isBatchExportingObsidian = ref(false)
+
+const handleBatchReSummarize = async () => {
+  if (!confirm('确定要用当前 LLM 配置重新总结所有有转录文本的任务吗？')) return
+  isBatchReSummarizing.value = true
+  const { info } = useToast()
+  info('正在批量提交重新总结任务...')
+  try {
+    const result = await batchReSummarize()
+    success(`已提交 ${result.success_count} 个任务重新总结（共 ${result.total} 个）`)
+  } catch (err) {
+    toastError('批量重新总结失败')
+  } finally {
+    isBatchReSummarizing.value = false
+  }
+}
+
+const handleBatchExportObsidian = async () => {
+  if (!confirm('确定要导出所有有总结的任务到 Obsidian 吗？')) return
+  isBatchExportingObsidian.value = true
+  const { info } = useToast()
+  info('正在批量导出到 Obsidian...')
+  try {
+    const result = await batchExportObsidian()
+    success(`已导出 ${result.success_count} 个任务到 Obsidian（共 ${result.total} 个）`)
+  } catch (err) {
+    toastError('批量导出失败')
+  } finally {
+    isBatchExportingObsidian.value = false
   }
 }
 
@@ -813,6 +848,8 @@ watch(
       :isUpdatingSummarizationSettings="isUpdatingSummarizationSettings"
       :isReadingBilibiliCookieFromBrowser="isReadingBilibiliCookieFromBrowser"
       :tempStats="tempStatsData"
+      :isBatchReSummarizing="isBatchReSummarizing"
+      :isBatchExportingObsidian="isBatchExportingObsidian"
       @close="isSettingsModalOpen = false"
       @updateLlmSettings="handleUpdateLlmSettings"
       @updateLlmSettingsAndTest="handleUpdateLlmSettingsAndTest"
@@ -825,6 +862,8 @@ watch(
       @updateSummarizationSettings="handleUpdateSummarizationSettings"
       @getTempStats="handleGetTempStats"
       @cleanupTemp="handleCleanupTemp"
+      @batchReSummarize="handleBatchReSummarize"
+      @batchExportObsidian="handleBatchExportObsidian"
     />
 
     <!-- 遮罩层 (Mobile Only) -->

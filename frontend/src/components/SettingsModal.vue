@@ -13,6 +13,7 @@ import {
   PhTrash,
   PhPlus,
   PhSwatches,
+  PhFloppyDisk,
 } from '@phosphor-icons/vue'
 import type { LLMProvider, LLMSettings, LLMPreset, TranscriptionSettings, SummarizationSettings } from '../types'
 
@@ -29,6 +30,8 @@ const props = defineProps<{
   isUpdatingSummarizationSettings: boolean
   isReadingBilibiliCookieFromBrowser: boolean
   tempStats: { total_files: number; total_size_mb: number; files_by_date: Record<string, number> } | null
+  isBatchReSummarizing: boolean
+  isBatchExportingObsidian: boolean
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +76,8 @@ const emit = defineEmits<{
   }]
   getTempStats: []
   cleanupTemp: []
+  batchReSummarize: []
+  batchExportObsidian: []
 }>()
 
 const settingsTab = ref<'llm' | 'transcription' | 'summarization' | 'storage'>('llm')
@@ -995,6 +1000,36 @@ watch(settingsTab, (tab) => {
                 <PhTrash :size="16" />
                 清理所有已完成任务文件
               </button>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+              <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
+                <PhBrain :size="18" class="text-blue-500" />
+                <h3 class="text-sm font-semibold text-slate-800">批量操作</h3>
+              </div>
+              <p class="text-xs text-slate-600 leading-relaxed">
+                使用当前 LLM 配置对全部有转录文本的任务重新总结，或批量导出到 Obsidian。
+              </p>
+              <div class="grid grid-cols-2 gap-3">
+                <button
+                  @click="emit('batchReSummarize')"
+                  :disabled="props.isBatchReSummarizing"
+                  class="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PhSpinner v-if="props.isBatchReSummarizing" :size="16" class="animate-spin" />
+                  <PhBrain v-else :size="16" />
+                  <span>{{ props.isBatchReSummarizing ? '提交中...' : '全部重新总结' }}</span>
+                </button>
+                <button
+                  @click="emit('batchExportObsidian')"
+                  :disabled="props.isBatchExportingObsidian"
+                  class="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <PhSpinner v-if="props.isBatchExportingObsidian" :size="16" class="animate-spin" />
+                  <PhFloppyDisk v-else :size="16" />
+                  <span>{{ props.isBatchExportingObsidian ? '导出中...' : '全部导出 Obsidian' }}</span>
+                </button>
+              </div>
             </div>
           </div>
           </div>

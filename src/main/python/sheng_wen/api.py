@@ -1223,6 +1223,131 @@ async def re_summarize_task(task_id: str, payload: ReSummarizeRequest | None = N
     return db.get_task(task_id)
 
 
+class BatchResponse(BaseModel):
+    total: int
+    success_count: int
+    fail_count: int
+    details: list[dict[str, str]]
+
+
+@app.post("/batch/re-summarize", response_model=BatchResponse)
+async def batch_re_summarize():
+    """对所有已完成或有 transcript 的任务批量重新总结。"""
+    all_tasks = db.list_tasks()
+    worker = await get_llm_worker()
+    results: list[dict[str, str]] = []
+    count = 0
+
+    for task in all_tasks:
+        tid = task.get("id", "")
+        if not task.get("transcript"):
+            continue
+        status = task.get("status", "")
+        if status in (TaskStatus.PENDING, TaskStatus.DOWNLOADING, TaskStatus.TRANSCRIBING):
+            continue
+
+        try:
+            resolved_summary_mode = _normalize_summary_mode(
+                None, fallback=str(task.get("summary_mode") or ""),
+            )
+            from .task_updater import update_and_notify
+            await update_and_notify(tid, {
+                "status": TaskStatus.SUMMARIZING,
+                "summary": "",
+                "progress": 0.0,
+                "summary_mode": resolved_summary_mode,
+                "summary_chunk_total": None,
+                "summary_chunk_done": None,
+                "summary_meta": None,
+            })
+            temp_file = os.path.join("temp", f"{tid}_re.txt")
+            os.makedirs("temp", exist_ok=True)
+            with open(temp_file, "w", encoding="utf-8") as f:
+                f.write(task["transcript"])
+            await worker.add_task({
+                "task_id": tid,
+                "intermediate_file_path": temp_file,
+                "output_file": os.path.join("temp", f"{tid}_re_summary.md"),
+                "summary_mode": resolved_summary_mode,
+            })
+            count += 1
+            results.append({"id": tid, "title": task.get("title", "")[:40], "status": "queued"})
+        except Exception as e:
+            results.append({"id": tid, "title": task.get("title", "")[:40], "status": f"error: {e}"})
+
+    return BatchResponse(total=len(results), success_count=count, fail_count=len(results) - count, details=results)
+
+
+@app.post("/batch/export-obsidian", response_model=BatchResponse)
+async def batch_export_obsidian():
+    """对所有有总结的任务批量导出到 Obsidian。"""
+    from datetime import datetime
+    all_tasks = db.list_tasks()
+    results: list[dict[str, str]] = []
+    count = 0
+
+    for task in all_tasks:
+        tid = task.get("id", "")
+        if not task.get("summary"):
+            continue
+
+        title = task.get("topic") or task.get("title") or "未命名视频"
+        video_url = task.get("video_url", "")
+        author_name = task.get("author_name", "")
+        author_url = task.get("author_url", "")
+        created_at = task.get("created_at", "")
+        if isinstance(created_at, str):
+            date_str = created_at[:10] if created_at else datetime.now().strftime("%Y-%m-%d")
+        else:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+
+        safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip()[:80]
+        filename = f"{safe_title}.md"
+        obsidian_inbox = r"D:\study\hxld_obsidian\inbox"
+        file_path = os.path.join(obsidian_inbox, filename)
+
+        lines = [
+            "---",
+            f"title: \"{title}\"",
+            f"date: {date_str}",
+            "tags:",
+            "  - 视频总结",
+            "  - AI笔记",
+        ]
+        if video_url:
+            lines.append(f"source: {video_url}")
+        if author_name:
+            lines.append(f"author: \"{author_name}\"")
+        if author_url:
+            lines.append(f"author_url: {author_url}")
+        lines.extend([
+            "type: 视频笔记",
+            "---",
+            "",
+            f"# {title}",
+            "",
+        ])
+        if video_url:
+            lines.append(f"> 来源：[{video_url}]({video_url})")
+        if author_name:
+            author_line = f"[{author_name}]({author_url})" if author_url else author_name
+            lines.append(f"> 作者：{author_line}")
+        if video_url or author_name:
+            lines.append("")
+        lines.append(task["summary"])
+
+        try:
+            os.makedirs(obsidian_inbox, exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            count += 1
+            results.append({"id": tid, "title": title[:40], "status": "ok"})
+        except Exception as e:
+            results.append({"id": tid, "title": title[:40], "status": f"error: {e}"})
+
+    return BatchResponse(total=len(results), success_count=count, fail_count=len(results) - count, details=results)
+
+
 @app.post("/tasks/{task_id}/resolve-author", response_model=Task)
 async def resolve_task_author(task_id: str):
     """

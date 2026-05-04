@@ -877,6 +877,14 @@ export function useTaskViewModel() {
         const msg = err?.response?.data?.detail || err?.message || '清理失败'
         return { success: false, deleted_files: 0, freed_size_mb: 0, error: msg }
       }
-    }
+    },
+    batchReSummarize: async (): Promise<{ total: number; success_count: number; fail_count: number }> => {
+      const response = await axios.post(`${apiBaseUrl}/batch/re-summarize`)
+      return response.data
+    },
+    batchExportObsidian: async (): Promise<{ total: number; success_count: number; fail_count: number }> => {
+      const response = await axios.post(`${apiBaseUrl}/batch/export-obsidian`)
+      return response.data
+    },
   }
 }
