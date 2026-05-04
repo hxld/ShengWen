@@ -386,6 +386,8 @@ class VideoDownloaderWorker(Worker):
 
     def _try_process_with_bilibili_subtitle(self, payload: Dict[str, Any]) -> bool:
         video_url = str(payload.get("video_url") or "")
+        if video_url and self._is_bilibili_url(video_url):
+            video_url = re.sub(r'^(https?://)(bilibili\.com)', r'\1www.\2', video_url)
         task_id = payload.get("task_id")
 
         if not video_url or not task_id:
@@ -603,6 +605,8 @@ class VideoDownloaderWorker(Worker):
         :param payload: 包含 'video_url' 的字典。
         """
         video_url = payload.get("video_url")
+        if video_url and self._is_bilibili_url(video_url):
+            video_url = re.sub(r'^(https?://)(bilibili\.com)', r'\1www.\2', video_url)
         quality = payload.get("quality", "best")
         task_id = payload.get("task_id") # 用于更新进度
 
