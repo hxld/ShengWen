@@ -302,11 +302,15 @@ class JSONConfigManager:
         name = str(preset.get("name") or "").strip()
         if not name:
             raise ValueError("预设名称不能为空")
+        api_key = str(preset.get("api_key") or "").strip()
+        if not api_key:
+            with self._lock:
+                api_key = str(self._config.get("llm", {}).get("api_key", ""))
         entry = {
             "name": name,
             "provider": str(preset.get("provider") or "openai_compatible"),
             "base_url": str(preset.get("base_url") or ""),
-            "api_key": str(preset.get("api_key") or ""),
+            "api_key": api_key,
             "model_id": str(preset.get("model_id") or ""),
             "temperature": float(preset.get("temperature", 0.7)),
             "context_window_size": int(preset.get("context_window_size", 1000000)),

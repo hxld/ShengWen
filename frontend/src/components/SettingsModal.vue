@@ -217,14 +217,18 @@ const handleTestLlm = () => {
 const handleSavePreset = () => {
   const name = llmPresetName.value.trim()
   if (!name) return
-  emit('saveLlmPreset', {
+  const payload: { name: string; provider: string; base_url: string; api_key?: string; model_id: string; temperature: number; context_window_size: number } = {
     name,
     provider: llmProvider.value,
     base_url: llmBaseUrl.value.trim(),
     model_id: llmModelId.value.trim(),
     temperature: llmTemperature.value,
     context_window_size: props.llmSettings?.context_window_size ?? 1000000,
-  })
+  }
+  if (llmApiKey.value.trim()) {
+    payload.api_key = llmApiKey.value.trim()
+  }
+  emit('saveLlmPreset', payload)
   llmPresetName.value = ''
   showSavePresetInput.value = false
 }
