@@ -8,7 +8,7 @@ from threading import Lock, Thread
 from collections import deque
 from typing import Any, Dict, TYPE_CHECKING
 from ..worker import Worker, TaskCancelledError
-from .transcriber import Transcriber, TranscriptionResult, TranscriptionCancelled
+from .transcriber import Transcriber, TranscriptionResult, TranscriptionCancelled, TranscriptionError
 from ..utils.logger import logger
 from ..api import notify_task_update
 from ..utils.ffmpeg_helper import FFmpegHelper
@@ -219,6 +219,115 @@ class TranscriberWorker(Worker):
         except Exception as e:
             logger.error(f"[{self.name}] 保存转录文件时出错: {e}", exc_info=True)
 
+    @staticmethod
+    def _get_audio_duration_seconds(audio_path: str) -> float:
+        try:
+            FFmpegHelper.configure_ffmpeg_python()
+            import subprocess
+            ffmpeg_exe = FFmpegHelper.get_yt_dlp_ffmpeg_location()
+            if not ffmpeg_exe:
+                ffmpeg_exe = "ffmpeg"
+            result = subprocess.run(
+                [ffmpeg_exe, "-i", audio_path, "-f", "null", "-"],
+                capture_output=True, text=True, timeout=30,
+            )
+            for line in result.stderr.splitlines():
+                if "Duration:" in line:
+                    parts = line.split("Duration:")[1].split(",")[0].strip()
+                    h, m, s = parts.split(":")
+                    return float(h) * 3600 + float(m) * 60 + float(s)
+        except Exception:
+            pass
+        return 0.0
+
+    def _split_and_transcribe(self, audio_file: str, task_id: str | None,
+                              progress_callback, cancel_check) -> TranscriptionResult:
+        import tempfile, shutil
+
+        chunk_duration = 1800  # 30 minutes per chunk
+        total_duration = self._get_audio_duration_seconds(audio_file)
+        if total_duration <= 0:
+            raise TranscriptionError(f"无法获取音频时长: {audio_file}")
+
+        num_chunks = int(total_duration / chunk_duration) + (1 if total_duration % chunk_duration > 0 else 0)
+        logger.info(f"[{self.name}] 分片转录: {audio_file} ({total_duration:.0f}s, {num_chunks} 片)")
+
+        chunk_dir = tempfile.mkdtemp(prefix="shengwen_chunk_")
+        all_segments: list[dict[str, Any]] = []
+        total_transcription_time = 0.0
+        total_model_load_time = 0.0
+        detected_language = ""
+        detected_lang_prob = 0.0
+        chunk_list = []
+
+        try:
+            for i in range(num_chunks):
+                if cancel_check():
+                    raise TaskCancelledError("任务已取消，停止分片转录。")
+
+                start = i * chunk_duration
+                chunk_path = os.path.join(chunk_dir, f"chunk_{i:04d}.mp3")
+                logger.info(f"[{self.name}] 提取分片 {i+1}/{num_chunks}: {start}s-{start+chunk_duration}s")
+
+                FFmpegHelper.configure_ffmpeg_python()
+                process = (
+                    ffmpeg
+                    .input(audio_file, ss=start, t=chunk_duration)
+                    .output(chunk_path, acodec="mp3", audio_bitrate="192k")
+                    .overwrite_output()
+                    .run_async(pipe_stdout=False, pipe_stderr=True)
+                )
+                _, stderr = process.communicate()
+                if process.returncode != 0:
+                    raise TranscriptionError(f"ffmpeg 分片失败 (chunk {i+1})")
+
+                if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) == 0:
+                    continue
+                chunk_list.append((i, chunk_path))
+
+            with self._transcriber_lock:
+                transcriber = self._transcriber
+
+            for idx, (i, chunk_path) in enumerate(chunk_list):
+                if cancel_check():
+                    raise TaskCancelledError("任务已取消，停止分片转录。")
+
+                logger.info(f"[{self.name}] 转录分片 {idx+1}/{len(chunk_list)}")
+                chunk_result = transcriber.transcribe(
+                    chunk_path,
+                    progress_callback=None,
+                    cancel_check=cancel_check,
+                )
+
+                time_offset = i * chunk_duration
+                for seg in chunk_result.segments:
+                    seg_copy = dict(seg)
+                    seg_copy["start"] = seg.get("start", 0) + time_offset
+                    seg_copy["end"] = seg.get("end", 0) + time_offset
+                    all_segments.append(seg_copy)
+
+                total_transcription_time += chunk_result.transcription_time
+                total_model_load_time = max(total_model_load_time, chunk_result.model_load_time)
+                if chunk_result.language:
+                    detected_language = chunk_result.language
+                    detected_lang_prob = chunk_result.language_probability
+
+                if progress_callback:
+                    progress_callback((idx + 1) / len(chunk_list))
+        finally:
+            shutil.rmtree(chunk_dir, ignore_errors=True)
+
+        return TranscriptionResult(
+            segments=all_segments,
+            transcription_time=total_transcription_time,
+            real_time_factor=total_transcription_time / total_duration if total_duration > 0 else 0,
+            total_time=total_transcription_time,
+            model_load_time=total_model_load_time,
+            audio_duration=total_duration,
+            language=detected_language,
+            language_probability=detected_lang_prob,
+        )
+
     def process_task(self, payload: Dict[str, Any]):
         """
         处理一个转录任务。
@@ -304,11 +413,17 @@ class TranscriberWorker(Worker):
 
             with self._transcriber_lock:
                 transcriber = self._transcriber
-            result = transcriber.transcribe(
-                audio_file,
-                progress_callback=progress_callback,
-                cancel_check=cancel_check,
-            )
+
+            audio_size_mb = os.path.getsize(audio_file) / (1024 * 1024)
+            if audio_size_mb > 150:
+                logger.info(f"[{self.name}] 音频文件 {audio_size_mb:.0f}MB 超过 150MB，启用分片转录")
+                result = self._split_and_transcribe(audio_file, task_id, progress_callback, cancel_check)
+            else:
+                result = transcriber.transcribe(
+                    audio_file,
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check,
+                )
             logger.info(f"[{self.name}] 转录完成。")
 
             # 打印性能指标
