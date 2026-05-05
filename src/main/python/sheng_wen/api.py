@@ -1271,9 +1271,9 @@ async def batch_re_summarize():
                 "summary_mode": resolved_summary_mode,
             })
             count += 1
-            results.append({"id": tid, "title": task.get("title", "")[:40], "status": "queued"})
+            results.append({"id": tid, "title": str(task.get("title") or "")[:40], "status": "queued"})
         except Exception as e:
-            results.append({"id": tid, "title": task.get("title", "")[:40], "status": f"error: {e}"})
+            results.append({"id": tid, "title": str(task.get("title") or "")[:40], "status": f"error: {e}"})
 
     return BatchResponse(total=len(results), success_count=count, fail_count=len(results) - count, details=results)
 
