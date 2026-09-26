@@ -581,4 +581,4 @@ python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().
 
 新安装的默认导出位置为 `~/Documents/ShengWen/exports`，可在“存储管理”修改。已设置的导出目录优先，不会被新默认值覆盖。
 
-`.github/workflows/cross-platform.yml` 提供 Windows/macOS/Linux 与 Python 3.10/3.13 回归矩阵。原生密钥环逻辑使用隔离适配器测试；实际系统的授权弹窗、密钥环解锁和浏览器 Cookie 解密仍需目标机器验收。
+跨平台回归测试保留为本地手动执行，不配置 GitHub Actions 自动运行。原生密钥环逻辑使用隔离适配器测试；实际系统的授权弹窗、密钥环解锁和浏览器 Cookie 解密仍需目标机器验收。
