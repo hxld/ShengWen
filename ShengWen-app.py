@@ -4,6 +4,13 @@ import sys
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
         stream.reconfigure(encoding="utf-8", errors="replace")
+# Repeated one-click launches must exit before importing DB/task recovery code.
+if __name__ == "__main__":
+    from src.main.python.sheng_wen.startup import preflight
+    startup_exit = preflight(os.path.dirname(os.path.abspath(__file__)), check_only="--check-startup" in sys.argv)
+    if startup_exit is not None:
+        raise SystemExit(startup_exit)
+
 import webbrowser
 import uvicorn
 import socket
@@ -101,7 +108,9 @@ def log_access_tips(port: int):
     logger.info("║  🚀 服务启动完成，可通过浏览器访问：                       ║")
     logger.info("╠════════════════════════════════════════════════════════════╣")
     logger.info(f"║  📱 本机访问:  http://localhost:{port}/")
-    if local_ip != "0.0.0.0":
+    if config.app.host in {"127.0.0.1", "localhost", "::1"}:
+        logger.info("║  🔒 当前仅允许本机访问。")
+    elif local_ip != "0.0.0.0":
         logger.info(f"║  🌐 局域网访问: http://{local_ip}:{port}/")
     else:
         logger.info(f"║  🌐 局域网访问: http://<本机IP>:{port}/")
@@ -279,6 +288,12 @@ if __name__ == "__main__":
         register_mdns_service(local_ip, port)
 
     # 确保 uvicorn 运行的是我们新创建的 app 实例
-    uvicorn.run(app, host=host, port=port)
+    # Bind before lifespan: a launch race must not recover another instance's tasks.
+    server_config = uvicorn.Config(app, host=host, port=port)
+    server_socket = server_config.bind_socket()
+    try:
+        uvicorn.Server(server_config).run(sockets=[server_socket])
+    finally:
+        server_socket.close()
 
 
