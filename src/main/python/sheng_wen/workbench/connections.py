@@ -1,5 +1,6 @@
 from __future__ import annotations
-import ctypes, json, os, threading
+import os, sys, threading
+from .credential_store import CredentialStore
 from pathlib import Path
 from http.cookies import SimpleCookie
 from datetime import datetime, timezone
@@ -45,44 +46,19 @@ def parse_cookies(text: str) -> dict[str, str]:
     return result
 
 
-class Blob(ctypes.Structure):
-    _fields_ = [("size", ctypes.c_ulong), ("data", ctypes.POINTER(ctypes.c_ubyte))]
-
-
-def protect(data: bytes, decrypt=False) -> bytes:
-    if os.name != "nt":
-        raise RuntimeError(
-            "此版本的持久化凭据存储使用 Windows DPAPI；其他系统请通过环境变量提供凭据"
-        )
-    buf = ctypes.create_string_buffer(data)
-    src = Blob(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)))
-    dst = Blob()
-    fn = (
-        ctypes.windll.crypt32.CryptUnprotectData
-        if decrypt
-        else ctypes.windll.crypt32.CryptProtectData
-    )
-    if not fn(ctypes.byref(src), None, None, None, None, 1, ctypes.byref(dst)):
-        raise ctypes.WinError()
-    try:
-        return ctypes.string_at(dst.data, dst.size)
-    finally:
-        ctypes.windll.kernel32.LocalFree(dst.data)
-
-
 class Connection:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, storage=None):
         self.path = path
         self.lock = threading.RLock()
-        self.data = {"cookies": {}, "status": "disconnected", "use_env": True}
-        if path.exists():
-            self.data = json.loads(protect(path.read_bytes(), True))
+        self.storage = storage if storage is not None else CredentialStore(path)
+        loaded = self.storage.load()
+        self.data = loaded or {"cookies": {}, "status": "disconnected", "use_env": True}
+        self.persisted = bool(loaded)
+        self._verified_cookies = None
 
     def _save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_suffix(".tmp")
-        temp.write_bytes(protect(json.dumps(self.data).encode()))
-        temp.replace(self.path)
+        self.persisted = self.storage.save(self.data)
+        return self.persisted
 
     def cookies(self, override: str = ""):
         if override:
@@ -101,9 +77,19 @@ class Connection:
             cookies = self.cookies()
             value = cookies.get("SESSDATA", "")
             return {
-                "status": self.data.get("status", "unverified")
+                "status": (
+                    self.data.get("status", "unverified")
+                    if self.data.get("cookies") or cookies == self._verified_cookies
+                    else "unverified"
+                )
+                if value
+                else "disconnected",
+                "storage_mode": self.storage.mode,
+                "storage_label": self.storage.label,
+                "storage_persistent": self.persisted
                 if self.data.get("cookies")
-                else ("unverified" if value else "disconnected"),
+                else False,
+                "storage_warning": self.storage.warning,
                 "source": self.data.get("source", "saved")
                 if self.data.get("cookies")
                 else ("env" if value else "none"),
@@ -120,7 +106,9 @@ class Connection:
     def import_value(self, text, source="manual"):
         cookies = parse_cookies(text)
         with self.lock:
+            self._verified_cookies = None
             self.data.update(
+                user_disconnected=False,
                 cookies=cookies,
                 status="unverified",
                 source=source,
@@ -128,18 +116,29 @@ class Connection:
                 checked_at=None,
                 message="已保存，尚未验证",
             )
-            self._save()
+            if not self._save():
+                self.data["message"] = (
+                    "凭据已在本次运行中生效，尚未持久保存；可以继续验证连接。"
+                )
         return self.status()
 
     def disconnect(self):
         with self.lock:
+            try:
+                self.storage.disconnect()
+            except OSError:
+                raise ValueError(
+                    "无法停用已保存的连接，请检查凭据目录权限；原连接未修改"
+                ) from None
             self.data = {
                 "cookies": {},
                 "status": "disconnected",
                 "use_env": False,
+                "user_disconnected": True,
                 "message": "已移除连接，环境变量回退也已停用",
             }
-            self._save()
+            self.persisted = True
+            self._verified_cookies = None
         return self.status()
 
     async def verify(self):
@@ -172,17 +171,23 @@ class Connection:
             status = "network_error"
             account = None
             message = "暂时无法验证，可能是网络或平台限制；已保留凭据"
-        with self.lock:
-            # Do not apply an old request to newly imported credentials.
-            if cookies == self.cookies():
-                self.data.update(
-                    status=status,
-                    account=account,
-                    checked_at=datetime.now(timezone.utc).isoformat(),
-                    message=message,
-                )
-                self._save()
-        return self.status()
+
+        def finish_verification():
+            with self.lock:
+                # Native keychains may block; never run their I/O on the HTTP event loop.
+                if cookies == self.cookies():
+                    self.data.update(
+                        status=status,
+                        account=account,
+                        checked_at=datetime.now(timezone.utc).isoformat(),
+                        message=message,
+                    )
+                    self._verified_cookies = cookies
+                    if self.data.get("cookies"):
+                        self._save()
+            return self.status()
+
+        return await asyncio.to_thread(finish_verification)
 
     def browser_import(self, browser="edge", profile=None):
         if browser not in ("edge", "chrome", "firefox", "brave"):
@@ -218,10 +223,23 @@ def get_connection():
     if _connection is None:
         from ..utils.project_root import get_project_root
 
-        _connection = Connection(
-            Path(os.getenv("SHENGWEN_DATA_DIR", str(get_project_root() / "data")))
-            / "bilibili.dpapi"
+        root = Path(os.getenv("SHENGWEN_DATA_DIR", str(get_project_root() / "data")))
+        filename = (
+            "bilibili.dpapi" if sys.platform == "win32" else "bilibili.credentials.json"
         )
+        _connection = Connection(root / filename)
+        try:
+            copied_windows_file = (
+                sys.platform != "win32"
+                and not (root / filename).exists()
+                and (root / "bilibili.dpapi").exists()
+            )
+        except OSError:
+            copied_windows_file = False
+        if copied_windows_file:
+            _connection.storage.warning = (
+                "检测到 Windows 凭据文件，已保留。请在当前系统重新连接 B 站账号。"
+            )
     return _connection
 
 

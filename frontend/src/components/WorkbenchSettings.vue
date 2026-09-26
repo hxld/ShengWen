@@ -88,7 +88,7 @@ async function importSecret() {
   await act(async () => {
     await wb.post("/connection/import", { value: secret.value });
     secret.value = "";
-  }, "凭据已保存到 Windows 加密存储，请验证连接");
+  }, "凭据已接收，请检查下方存储状态并验证连接");
 }
 async function chooseCookie(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0];
@@ -162,6 +162,11 @@ onUnmounted(() => {
           来源：{{ sourceLabels[account.source] || account.source || "无" }} ·
           凭据：{{ account.masked || "未设置" }}
         </p>
+        <p class="text-xs text-slate-600">
+          凭据存储：{{ account.storage_label || '正在读取' }}
+          <span v-if="account.has_cookie"> · {{ account.storage_persistent ? '已持久保存' : account.source === 'env' ? '来自环境变量' : '仅本次运行有效' }}</span>
+        </p>
+        <p v-if="account.storage_warning" role="status" class="text-xs text-amber-700 bg-amber-50 p-3 rounded-lg">{{ account.storage_warning }}</p>
         <p v-if="account.checked_at" class="text-xs text-slate-500">
           上次验证：{{ new Date(account.checked_at).toLocaleString() }}
         </p>
@@ -218,7 +223,7 @@ onUnmounted(() => {
                       browser,
                       profile: profile || null,
                     }),
-                  '浏览器凭据已保存，请验证连接',
+                  '浏览器凭据已读取，请检查存储状态并验证连接',
                 )
               "
             >
@@ -238,7 +243,7 @@ onUnmounted(() => {
             type="password"
             autocomplete="off"
             class="input"
-            placeholder="仅保存在当前 Windows 用户的加密存储中"
+            placeholder="通过当前系统安全存储保存；不可用时仅本次运行有效"
           />
           <div class="flex gap-3 items-center">
             <button

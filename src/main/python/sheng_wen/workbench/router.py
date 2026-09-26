@@ -17,6 +17,7 @@ from .transcripts import (
 )
 from . import service, models
 from .runtime import runtime
+from .paths import default_export_dir
 
 router = APIRouter(prefix="/workbench", tags=["workbench"])
 
@@ -73,7 +74,11 @@ async def connection_verify():
 
 @router.delete("/connection")
 async def connection_remove():
-    return get_connection().disconnect()
+    connection = get_connection()
+    result = connection.disconnect()
+    api = service.api_module()
+    service.migrate_legacy_connection(api.config_manager, connection, api.transcription_settings_manager)
+    return result
 
 
 _qr = {}
@@ -216,7 +221,7 @@ async def settings():
     return {
         "template": s.setting("template", "course"),
         "templates": TEMPLATES,
-        "obsidian_dir": s.setting("obsidian_dir", r"D:\study\hxld_obsidian\inbox"),
+        "obsidian_dir": s.setting("obsidian_dir") or default_export_dir(),
         "glossary": s.setting("glossary", ""),
         "host": service.api_module().config.app.host,
     }

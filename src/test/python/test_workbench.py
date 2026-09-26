@@ -23,6 +23,10 @@ SRT = "1\n00:00:01,000 --> 00:00:03,000\n缓存可以减少重复请求\n\n2\n00
 
 class WorkbenchTests(unittest.TestCase):
     def setUp(self):
+        from cryptography.fernet import Fernet
+        environment = patch.dict(os.environ, {"SHENGWEN_SECRET_KEY": Fernet.generate_key().decode()})
+        environment.start()
+        self.addCleanup(environment.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.old_store = store._store

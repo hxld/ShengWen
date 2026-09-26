@@ -553,3 +553,32 @@ Made ❤️ by **[smileFAace](https://linux.do/u/smileface/summary)**
 
 </div>
 
+
+## 跨平台运行与 B 站凭据存储
+
+Python 3.10+；Windows 使用 `.bat`，macOS / Linux 使用 `deploy一键部署.sh` 和 `run一键启动.sh`。虚拟环境需要在目标系统重新安装，不能复制 Windows 的 `.venv`。本地模型文件可复用，但模型目录必须改成目标系统实际路径。macOS 当前使用 CPU 转录，本项目尚未接入 Apple GPU；Linux / Windows 的 NVIDIA GPU 需要对应 CUDA 环境。
+
+凭据存储按运行环境选择：
+
+| 环境 | 默认方式 |
+|---|---|
+| Windows | DPAPI，兼容现有 `data/bilibili.dpapi` |
+| macOS | 系统 Keychain（通过 keyring） |
+| Linux 桌面 | Secret Service，需要可用且已解锁的系统密钥环和 D-Bus 会话 |
+| 无桌面 Linux / 无可用密钥环 | 默认仅本次运行；可设置 `SHENGWEN_SECRET_KEY` 使用加密文件 |
+
+`SHENGWEN_SECRET_KEY` 是 cryptography Fernet 格式的密钥。可用下面的命令生成一次，随后放入仅服务账号可读的环境文件或部署系统的 Secret 配置中：
+
+```bash
+python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+```
+
+启动时提供同一个 `SHENGWEN_SECRET_KEY`，不要每次重新生成，不要把密钥提交到 Git 或和加密凭据文件一起公开。设置该变量会优先采用加密文件存储。更换或遗失密钥后，旧文件会保留并提示无法解密，需要恢复原密钥或重新导入。
+
+也可由进程环境提供 `BILIBILI_SESSDATA`；验证环境变量连接不会将该值复制到磁盘。未配置安全持久化时，页面会明确提示“仅本次运行有效”。程序不会自动回退到明文凭据文件。
+
+旧配置中的凭据只有在安全存储确认保存成功后才会清除。密钥环不可用、目录不可写或凭据来自其他系统时，不会因此阻止服务启动；旧文件保留。Windows DPAPI 文件不能直接在 Mac/Linux 解密，系统密钥环的引用文件也不能代替系统密钥环本身，跨系统迁移时通常需要重新连接账号。
+
+新安装的默认导出位置为 `~/Documents/ShengWen/exports`，可在“存储管理”修改。已设置的导出目录优先，不会被新默认值覆盖。
+
+`.github/workflows/cross-platform.yml` 提供 Windows/macOS/Linux 与 Python 3.10/3.13 回归矩阵。原生密钥环逻辑使用隔离适配器测试；实际系统的授权弹窗、密钥环解锁和浏览器 Cookie 解密仍需目标机器验收。

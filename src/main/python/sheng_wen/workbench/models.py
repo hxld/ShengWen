@@ -10,6 +10,13 @@ _jobs = {}
 _lock = threading.Lock()
 
 
+def _sha256_stream(stream):
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def catalog():
     ROOT.mkdir(exist_ok=True)
     result = []
@@ -112,7 +119,7 @@ def _download(name, job):
             if target.is_file() and target.stat().st_size == size:
                 with target.open("rb") as inp:
                     valid = (
-                        (hashlib.file_digest(inp, "sha256").hexdigest() == sha)
+                        (_sha256_stream(inp) == sha)
                         if sha
                         else True
                     )
@@ -175,7 +182,7 @@ def _download(name, job):
                     with (parts / f"{info['sha']}-{start}").open("rb") as inp:
                         shutil.copyfileobj(inp, out)
             with tmp.open("rb") as inp:
-                if not sha or hashlib.file_digest(inp, "sha256").hexdigest() != sha:
+                if not sha or _sha256_stream(inp) != sha:
                     raise ValueError("模型哈希不一致，请重试")
             tmp.replace(target)
             for start in starts:

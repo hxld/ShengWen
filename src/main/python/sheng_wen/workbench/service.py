@@ -103,21 +103,30 @@ async def retry(task_id, force=False):
     return api.db.get_task(task_id)
 
 
+def migrate_legacy_connection(manager, connection, transcription_settings):
+    """Only remove old credentials after secure storage has acknowledged the write."""
+    from ..utils.logger import logger
+    cfg = manager.get_raw_config().get("whisper", {})
+    secret = cfg.get("bilibili_cookie_string") or cfg.get("bilibili_sessdata")
+    if not secret:
+        return
+    if not connection.data.get("user_disconnected") and not connection.data.get("cookies"):
+        connection.import_value(secret, "migrated")
+    if connection.persisted:
+        try:
+            manager.update_section("whisper", {"bilibili_sessdata": "", "bilibili_cookie_string": ""})
+        except Exception:
+            connection.storage.warning = "连接已安全保存，但旧配置尚未清理，请检查 config/settings.json 的写入权限。"
+            logger.warning("[Credentials] 旧配置无法清理；保留原文件，继续启动。")
+    else:
+        logger.warning("[Credentials] 安全存储不可用，旧凭据配置已保留；当前连接仅在本次运行中使用。")
+    transcription_settings._bilibili_sessdata = ""
+
+
 async def initialize():
     api = api_module()
     from .connections import get_connection
-
-    manager = api.config_manager
-    cfg = manager.get_raw_config().get("whisper", {})
-    secret = cfg.get("bilibili_cookie_string") or cfg.get("bilibili_sessdata")
-    if secret:
-        connection = get_connection()
-        if not connection.data.get("cookies"):
-            connection.import_value(secret, "migrated")
-        manager.update_section(
-            "whisper", {"bilibili_sessdata": "", "bilibili_cookie_string": ""}
-        )
-        api.transcription_settings_manager._bilibili_sessdata = ""
+    migrate_legacy_connection(api.config_manager, get_connection(), api.transcription_settings_manager)
     # Recovery is explicit for interrupted work; pending durable jobs can safely be requeued.
     for task in api.db.list_tasks():
         if task["status"] == "PENDING":
@@ -141,9 +150,8 @@ def export_note(task, directory=None):
     import yaml
 
     store = get_store()
-    directory = directory or store.setting(
-        "obsidian_dir", r"D:\study\hxld_obsidian\inbox"
-    )
+    from .paths import default_export_dir
+    directory = directory or store.setting("obsidian_dir") or default_export_dir()
     p = Path(directory)
     if not p.is_absolute():
         raise ValueError("导出目录必须是绝对路径")

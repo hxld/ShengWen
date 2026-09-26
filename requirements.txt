@@ -17,3 +17,6 @@ browser-cookie3==0.19.1
 
 requests>=2.32.0
 PyYAML>=6.0
+
+cryptography>=44
+keyring>=25.6,<26; sys_platform != "win32"

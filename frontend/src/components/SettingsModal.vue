@@ -685,7 +685,7 @@ watch(settingsTab, (tab) => {
                 <input
                   v-model="transcriptionModelPathInput"
                   type="text"
-                  placeholder="例如: E:/models/faster-whisper/tiny"
+                  placeholder="填写当前系统上的模型目录绝对路径"
                   class="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-60"
                   :disabled="transcriptionModelSource !== 'manual_path'"
                 >
