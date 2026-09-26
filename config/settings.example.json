@@ -1,6 +1,6 @@
 {
   "app": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 8000,
     "enable_progress_test": false,
     "enable_mdns": false,
@@ -30,7 +30,7 @@
     "json_file_path": "tasks.json"
   },
   "cors": {
-    "allow_origins": "*",
+    "allow_origins": "http://localhost:8000,http://127.0.0.1:8000",
     "allow_credentials": true,
     "allow_methods": "*",
     "allow_headers": "*"

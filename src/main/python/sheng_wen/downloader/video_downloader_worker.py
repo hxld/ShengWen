@@ -37,7 +37,8 @@ class VideoDownloaderWorker(Worker):
             netloc = (urlparse(video_url).netloc or "").lower()
         except Exception:
             return False
-        return "bilibili.com" in netloc or "b23.tv" in netloc
+        host = urlparse(video_url).hostname or ""
+        return host == "bilibili.com" or host.endswith(".bilibili.com") or host == "b23.tv"
 
     @staticmethod
     def _format_duration(seconds: float) -> str:
@@ -235,7 +236,11 @@ class VideoDownloaderWorker(Worker):
             raise RuntimeError("未安装 bilibili-api-python，无法进行 B 站字幕直取") from exc
 
         bvid = self._extract_bvid_from_url(video_url)
-        credential = Credential(sessdata=sessdata or None) if sessdata else None
+        from ..workbench.connections import get_connection
+        cookies = get_connection().cookies()
+        if sessdata and cookies.get("SESSDATA") != sessdata:
+            cookies = {"SESSDATA": sessdata}
+        credential = Credential.from_cookies(cookies)
 
         video_obj = video.Video(bvid=bvid, credential=credential)
         info = await video_obj.get_info()
@@ -623,6 +628,10 @@ class VideoDownloaderWorker(Worker):
             if task_id and self.is_task_cancelled(task_id):
                 raise TaskCancelledError(f"任务已取消，跳过下载: {task_id}")
 
+            if self._is_bilibili_url(video_url):
+                from ..workbench.bilibili import process_bilibili
+                process_bilibili(self, payload)
+                return
             if self._try_process_with_bilibili_subtitle(payload):
                 return
         except TaskCancelledError as e:

@@ -30,6 +30,7 @@ class LLMWorker(Worker):
     def __init__(self, name: str, llm_client: LLM):
         super().__init__(name)
         self._llm_client = llm_client
+        self._execution_client = llm_client
         self.system_prompt: str | None = None
         self._chunk_prompt_cache_path: str | None = None
         self._chunk_prompt_cache_text: str | None = None
@@ -76,6 +77,15 @@ class LLMWorker(Worker):
             if task_data is None:
                 raise TaskCancelledError(f"任务已被删除，停止总结: {task_id}")
 
+        from ..workbench.transcripts import TEMPLATES
+        from ..workbench.store import get_store
+        self._execution_client = self._llm_client
+        if task_id:
+            current = self._execution_client.config
+            get_store().meta(task_id, {"generation": {"model": current.model_id, "provider": current.provider, "temperature": current.temperature}})
+        self._summary_run_id = str(payload.get("summary_run_id", "default"))
+        template_id = payload.get("template", get_store().setting("template", "course"))
+        self._template_prompt = TEMPLATES.get(template_id, TEMPLATES["course"])["prompt"]
         requested_mode = self._resolve_requested_mode(payload, task_data)
         effective_mode = self._resolve_effective_mode(
             requested_mode=requested_mode,
@@ -237,7 +247,7 @@ class LLMWorker(Worker):
             raise RuntimeError("未加载系统提示词，无法执行标准总结。")
 
         messages = [
-            LLMMessage(role="system", content=self.system_prompt),
+            LLMMessage(role="system", content=self.system_prompt + "\n" + getattr(self, "_template_prompt", "")),
             LLMMessage(role="user", content=transcript_text),
         ]
         response_chunks: list[str] = []
@@ -296,7 +306,7 @@ class LLMWorker(Worker):
             if task_id:
                 self._submit_coro(flush_partial_summary())
 
-        await self._llm_client.response(messages=messages, resp_callback=callback)
+        await self._execution_client.response(messages=messages, resp_callback=callback)
         if llm_error:
             raise llm_error
 
@@ -431,8 +441,8 @@ class LLMWorker(Worker):
             self._submit_coro(flush_chunk_stream(done, total, streaming_summary))
 
         summarizer = ChunkedSummarizer(
-            llm_client=self._llm_client,
-            chunk_system_prompt=chunk_prompt,
+            llm_client=self._execution_client,
+            chunk_system_prompt=chunk_prompt + "\n" + getattr(self, "_template_prompt", ""),
             chunk_target_duration_sec=config.summarization.chunk_target_duration_sec,
             chunk_min_duration_sec=config.summarization.chunk_min_duration_sec,
             chunk_max_duration_sec=config.summarization.chunk_max_duration_sec,
@@ -444,6 +454,7 @@ class LLMWorker(Worker):
             cancel_check=cancel_check,
             chunk_debug_dump_enabled=config.summarization.chunk_debug_dump_enabled,
             chunk_debug_dump_dir=config.summarization.chunk_debug_dump_dir,
+            checkpoint_path=f"temp/{task_id}/summary-{self._summary_run_id}.json" if task_id else None,
         )
 
         result = await summarizer.summarize(

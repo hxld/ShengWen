@@ -1,6 +1,9 @@
 import asyncio
 import os
 import sys
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
 import webbrowser
 import uvicorn
 import socket
@@ -198,7 +201,9 @@ async def lifespan(app: FastAPI):
     - 关闭时停止所有 Workers
     """
     # 启动恢复：把上次异常中断遗留在中间态的任务回收为 FAILED，避免前端永远卡在"处理中"。
+    from src.main.python.sheng_wen.workbench.service import initialize
     recovered_count = api_module.db.recover_interrupted_tasks()
+    await initialize()
     if recovered_count > 0:
         logger.warning(
             f"--- [Lifespan] 检测到 {recovered_count} 个中断任务，已自动标记为 FAILED（可手动重试） ---"
@@ -237,6 +242,10 @@ app.add_middleware(
     allow_methods=cors_cfg.methods_list,
     allow_headers=cors_cfg.headers_list,
 )
+
+from src.main.python.sheng_wen.workbench.access import AccessMiddleware, value_error_handler
+app.add_middleware(AccessMiddleware)
+app.add_exception_handler(ValueError, value_error_handler)
 
 # 将原始 api.py 中定义的路由挂载到新实例上
 app.include_router(api_module.app.router)

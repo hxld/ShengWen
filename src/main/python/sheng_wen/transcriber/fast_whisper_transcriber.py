@@ -381,7 +381,9 @@ class FastWhisperTranscriber(Transcriber):
             heartbeat_thread.start()
 
             progress_state["phase"] = "initializing"
-            segments_generator, info = self.model.transcribe(file_path, word_timestamps=True)
+            from ..workbench.store import get_store
+            glossary = get_store().setting("glossary", "")
+            segments_generator, info = self.model.transcribe(file_path, word_timestamps=True, initial_prompt=glossary or None)
             progress_state["phase"] = "streaming"
             logger.info("[FastWhisperTranscriber] 已创建分段生成器，开始拉取分段...")
 

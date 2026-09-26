@@ -436,6 +436,9 @@ class TranscriberWorker(Worker):
 
             intermediate_file_path = os.path.splitext(output_file)[0] + ".txt"
             self._save_transcription_to_file(result, intermediate_file_path)
+            if task_id:
+                from ..workbench.store import get_store
+                get_store().segments(task_id, [dict(s, timing_inferred=False, source="asr") for s in result.segments])
 
             if task_id:
                 from ..db import db, TaskStatus

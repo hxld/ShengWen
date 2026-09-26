@@ -34,7 +34,7 @@ export async function getMermaid(): Promise<Mermaid> {
       suppressErrorRendering: true,
       theme: 'base',
       themeVariables: customTheme,
-      securityLevel: 'loose',
+      securityLevel: 'strict',
       flowchart: {
         htmlLabels: false,
         curve: 'basis',

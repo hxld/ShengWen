@@ -30,6 +30,14 @@ async def update_and_notify(task_id: str, updates: Dict[str, Any]) -> dict | Non
     from .db import db, TaskStatus
     from .api import notify_task_update
 
+    from .workbench.store import get_store
+    store = get_store()
+    job = store.job(task_id)
+    if job and job["cancelled"] and not str(updates.get("error_message", "")).startswith("已取消"):
+        return db.get_task(task_id)
+    if updates.get("status") == "COMPLETED" and updates.get("summary"):
+        store.version(task_id, "summary", updates["summary"], {**(job or {}).get("payload", {}), "actual_generation": store.meta(task_id).get("generation", {})})
+        store.meta(task_id, {"summary_stale": False})
     # 读取旧状态用于日志追踪
     old_task = db.get_task(task_id)
     old_status = old_task.get("status") if old_task else None

@@ -38,7 +38,7 @@ def _resolve_project_path(path_str: str) -> str:
 
 @dataclass
 class AppConfig:
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     enable_progress_test: bool = False
     enable_mdns: bool = False
@@ -97,7 +97,7 @@ class DatabaseConfig:
 
 @dataclass
 class CORSConfig:
-    allow_origins: str = "*"
+    allow_origins: str = "http://localhost:8000,http://127.0.0.1:8000"
     allow_credentials: bool = True
     allow_methods: str = "*"
     allow_headers: str = "*"
@@ -239,9 +239,8 @@ class JSONConfigManager:
                 raise ValueError("配置文件根节点必须是 JSON 对象")
             self._config = _deep_merge(DEFAULT_SETTINGS, loaded)
         except Exception as e:
-            logger.warning(f"[JSONConfigManager] 读取配置失败，回退默认值: {e}")
-            self._config = copy.deepcopy(DEFAULT_SETTINGS)
-            self._write_locked()
+            logger.warning(f"[JSONConfigManager] 读取配置失败，已保留原文件: {e}")
+            raise ValueError(f"配置文件无法读取，已保留原文件，请修复或从备份恢复: {self._config_path}") from e
 
     def _write_locked(self):
         temp_path = self._config_path.with_suffix(self._config_path.suffix + ".tmp")

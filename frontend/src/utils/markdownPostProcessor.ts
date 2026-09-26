@@ -1,7 +1,10 @@
+import DOMPurify from 'dompurify'
+import { buildTimestampJumpUrl } from './videoTimeJump'
 import { replaceTimestampMarksWithChips } from './markdownTimestampChips'
 
 export interface MarkdownPostProcessOptions {
   videoUrl?: string
+  sourceMap?: Array<{start:number;end:number;part:number;url:string}>
 }
 
 /**
@@ -16,7 +19,7 @@ export const postProcessCompiledMarkdown = (html: string, options?: MarkdownPost
   }
 
   const template = document.createElement('template')
-  template.innerHTML = html
+  template.innerHTML = DOMPurify.sanitize(html, { USE_PROFILES: { html: true }, FORBID_TAGS: ["style", "iframe", "form", "input"], FORBID_ATTR: ["style"] })
 
   const codeNodes = Array.from(template.content.querySelectorAll('code')) as HTMLElement[]
   for (const code of codeNodes) {
@@ -33,5 +36,13 @@ export const postProcessCompiledMarkdown = (html: string, options?: MarkdownPost
 
   replaceTimestampMarksWithChips(template.content, { videoUrl: options?.videoUrl })
 
+  for (const chip of template.content.querySelectorAll<HTMLAnchorElement>('a[data-seconds]')) {
+    const seconds = Number(chip.dataset.seconds)
+    const part = options?.sourceMap?.find(p => p.start <= seconds && seconds < p.end)
+    if (part) {
+      const url = buildTimestampJumpUrl(part.url, seconds - part.start)
+      if (url) { chip.href = url; chip.title = `P${part.part} · 原视频时间` }
+    }
+  }
   return template.innerHTML
 }

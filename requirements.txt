@@ -14,3 +14,6 @@ redis==5.2.1
 websockets==14.1
 zeroconf==0.131.0
 browser-cookie3==0.19.1
+
+requests>=2.32.0
+PyYAML>=6.0

@@ -110,7 +110,7 @@ class LiteLLMClient(LLM):
 
         # 处理不支持 system role 的模型（如 Gemini）
         # 将 system 消息合并到第一条 user 消息中
-        if message_dicts and message_dicts[0].get("role") == "system":
+        if self.config.provider == "legacy_no_system" and message_dicts and message_dicts[0].get("role") == "system":
             system_content = message_dicts[0].get("content", "")
             # 查找第一条 user 消息
             user_idx = next((i for i, m in enumerate(message_dicts) if m.get("role") == "user"), None)
@@ -120,6 +120,14 @@ class LiteLLMClient(LLM):
                 message_dicts[user_idx]["content"] = f"{system_content}\n\n{user_content}"
                 # 移除 system 消息
                 message_dicts.pop(0)
+        from litellm import token_counter
+        budget = max(1024, self.config.context_window_size)
+        try:
+            used = token_counter(model=self.config.model_id, messages=message_dicts)
+        except Exception:
+            used = sum(len(m["content"].encode("utf-8")) for m in message_dicts)
+        if used > budget - min(8192, budget // 4):
+            raise ValueError("输入超过模型 Token 预算，请使用自动/分块模式或提高实际支持的上下文配置")
         model_candidates = self._model_candidates()
         last_exception: Exception | None = None
 

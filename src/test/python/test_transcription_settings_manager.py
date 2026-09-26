@@ -20,6 +20,15 @@ class _DummyTranscriberWorker:
 
 
 class TestTranscriptionSettingsManager(unittest.TestCase):
+    def setUp(self):
+        from unittest.mock import MagicMock
+        connection = MagicMock()
+        connection.cookies.return_value = {}
+        connection.data = {"use_env": True}
+        self.connection_patch = patch("src.main.python.sheng_wen.workbench.connections.get_connection", return_value=connection)
+        self.connection_patch.start()
+        self.addCleanup(self.connection_patch.stop)
+
     def test_toggle_bilibili_subtitle_fetch(self):
         manager = TranscriptionSettingsManager(initial_device="cpu", model_size="tiny")
 
@@ -76,8 +85,9 @@ class TestTranscriptionSettingsManager(unittest.TestCase):
         ) as mocked_get_transcriber:
             settings = manager.update_settings(device="cpu")
 
-        mocked_get_transcriber.assert_called_once()
-        self.assertIs(worker.updated_transcriber, sentinel_transcriber)
+        mocked_get_transcriber.assert_not_called()
+        from src.main.python.sheng_wen.workbench.runtime import runtime
+        self.assertIs(worker.updated_transcriber, runtime)
         self.assertEqual(settings["device"], "cpu")
         self.assertEqual(manager.get_runtime_state()["device"], "cpu")
 
@@ -104,6 +114,16 @@ class TestTranscriptionSettingsManager(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 manager.update_settings(model_source="manual_path", model_path=temp_dir)
             self.assertIn("缺少必要文件", str(ctx.exception))
+
+    def test_manual_model_path_accepts_large_v3_json_vocabulary(self):
+        manager = TranscriptionSettingsManager(initial_device="cpu", model_size="large")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for name in ("config.json", "model.bin", "tokenizer.json", "vocabulary.json"):
+                with open(os.path.join(temp_dir, name), "w", encoding="utf-8") as f:
+                    f.write("{}")
+            settings = manager.update_settings(model_source="manual_path", model_path=temp_dir)
+            self.assertTrue(settings["model_path_valid"])
+            self.assertEqual(manager.build_transcriber_kwargs()["model_size_or_path"], temp_dir)
 
     def test_manual_model_path_accepts_complete_directory(self):
         manager = TranscriptionSettingsManager(initial_device="cpu", model_size="tiny")

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
+import WorkbenchSettings from './WorkbenchSettings.vue'
 import {
   PhX,
   PhCpu,
@@ -36,12 +37,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   close: []
+  refreshSettings: []
   updateLlmSettings: [payload: {
     provider: string
     base_url?: string
     api_key?: string
     model_id?: string
     temperature?: number
+    context_window_size?: number
   }]
   testLlm: []
   updateLlmSettingsAndTest: [payload: {
@@ -50,6 +53,7 @@ const emit = defineEmits<{
     api_key?: string
     model_id?: string
     temperature?: number
+    context_window_size?: number
   }]
   saveLlmPreset: [payload: { name: string; provider: string; base_url: string; api_key?: string; model_id: string; temperature: number; context_window_size: number }]
   deleteLlmPreset: [name: string]
@@ -80,13 +84,14 @@ const emit = defineEmits<{
   batchExportObsidian: []
 }>()
 
-const settingsTab = ref<'llm' | 'transcription' | 'summarization' | 'storage'>('llm')
+const settingsTab = ref<'llm' | 'transcription' | 'summarization' | 'storage' | 'connections'>('connections')
 
 // LLM 设置
 const llmProvider = ref('')
 const llmBaseUrl = ref('')
 const llmModelId = ref('')
 const llmTemperature = ref(0.7)
+const llmContextWindow = ref(1000000)
 const llmApiKey = ref('')
 const llmPresetName = ref('')
 const showSavePresetInput = ref(false)
@@ -117,13 +122,6 @@ const minutesToSeconds = (minutes: number) => {
   return Math.round(Number(minutes || 0) * 60)
 }
 
-const bilibiliCookieSourceLabel = computed(() => {
-  const source = props.transcriptionSettings?.bilibili_cookie_source || 'none'
-  if (source === 'global') return '全局配置'
-  if (source === 'env') return '环境变量'
-  return '未设置'
-})
-
 const requiredModelFilesLabel = computed(() => {
   const files = props.transcriptionSettings?.required_model_files || []
   if (!files.length) return 'config.json, model.bin, tokenizer.json, vocabulary.txt'
@@ -136,6 +134,7 @@ watch(() => props.llmSettings, (settings) => {
     llmBaseUrl.value = settings.base_url || ''
     llmModelId.value = settings.model_id || ''
     llmTemperature.value = settings.temperature ?? 0.7
+    llmContextWindow.value = settings.context_window_size || 1000000
     llmApiKey.value = ''
   }
 }, { immediate: true })
@@ -178,11 +177,13 @@ const handleSaveLlmSettings = () => {
     api_key?: string
     model_id?: string
     temperature?: number
+    context_window_size?: number
   } = {
     provider: llmProvider.value,
     base_url: llmBaseUrl.value.trim(),
     model_id: llmModelId.value.trim(),
     temperature: llmTemperature.value,
+    context_window_size: llmContextWindow.value,
   }
 
   if (llmApiKey.value.trim()) {
@@ -190,7 +191,6 @@ const handleSaveLlmSettings = () => {
   }
 
   emit('updateLlmSettings', payload)
-  llmApiKey.value = ''
 }
 
 const handleTestLlm = () => {
@@ -201,11 +201,13 @@ const handleTestLlm = () => {
     api_key?: string
     model_id?: string
     temperature?: number
+    context_window_size?: number
   } = {
     provider: llmProvider.value,
     base_url: llmBaseUrl.value.trim(),
     model_id: llmModelId.value.trim(),
     temperature: llmTemperature.value,
+    context_window_size: llmContextWindow.value,
   }
 
   if (llmApiKey.value.trim()) {
@@ -216,7 +218,6 @@ const handleTestLlm = () => {
   emit('updateLlmSettingsAndTest', payload)
 
   // 清空 API Key 输入框
-  llmApiKey.value = ''
 }
 
 const handleSavePreset = () => {
@@ -268,15 +269,6 @@ const handleSaveTranscriptionSettings = () => {
   }
 
   emit('updateTranscriptionSettings', payload)
-  globalBilibiliSessdataInput.value = ''
-}
-
-const clearGlobalBilibiliSessdata = () => {
-  emit('updateTranscriptionSettings', { clear_bilibili_sessdata: true })
-}
-
-const handleReadBilibiliCookieFromBrowser = () => {
-  emit('readBilibiliCookieFromBrowser')
 }
 
 const handleSaveSummarizationSettings = () => {
@@ -305,6 +297,8 @@ watch(settingsTab, (tab) => {
     <div
       v-if="isOpen"
       class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-4 gap-4"
+      role="dialog" aria-modal="true" aria-label="设置"
+      @keydown.esc="emit('close')"
       @click.self="emit('close')"
     >
       <!-- 弹窗主体 -->
@@ -335,7 +329,7 @@ watch(settingsTab, (tab) => {
               ]"
             >
               <PhMicrophone :size="18" :weight="settingsTab === 'transcription' ? 'fill' : 'regular'" />
-              <span>转录设置</span>
+              <span>语音识别与模型</span>
             </button>
 
             <button
@@ -348,7 +342,7 @@ watch(settingsTab, (tab) => {
               ]"
             >
               <PhGitBranch :size="18" :weight="settingsTab === 'summarization' ? 'fill' : 'regular'" />
-              <span>Agent 设置</span>
+              <span>输出与高级参数</span>
             </button>
 
             <button
@@ -363,6 +357,7 @@ watch(settingsTab, (tab) => {
               <PhHardDrives :size="18" :weight="settingsTab === 'storage' ? 'fill' : 'regular'" />
               <span>存储管理</span>
             </button>
+            <button class="px-3 py-2.5 text-sm rounded-lg text-left" :class="settingsTab === 'connections' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'" @click="settingsTab='connections'">账号与来源</button>
           </nav>
         </div>
 
@@ -371,10 +366,10 @@ watch(settingsTab, (tab) => {
           <!-- 头部栏 (仅桌面端) -->
           <div class="hidden md:flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
             <h2 class="text-lg font-semibold text-slate-800">
-              {{ settingsTab === 'llm' ? 'LLM 配置' : settingsTab === 'transcription' ? '转录设置' : settingsTab === 'summarization' ? 'Agent 设置' : '存储管理' }}
+              {{ settingsTab === 'connections' ? '账号与来源' : settingsTab === 'llm' ? 'AI 连接' : settingsTab === 'transcription' ? '转录设置' : settingsTab === 'summarization' ? 'Agent 设置' : '存储管理' }}
             </h2>
             <button
-              @click="emit('close')"
+              aria-label="关闭设置" @click="emit('close')"
               class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
             >
               <PhX :size="20" />
@@ -519,6 +514,7 @@ watch(settingsTab, (tab) => {
                 </div>
               </div>
 
+              <details class="border rounded-xl p-4"><summary class="text-sm cursor-pointer">高级：模型 Token 预算</summary><label class="block mt-3 text-xs">按供应商实际支持的上下文长度填写<input v-model.number="llmContextWindow" type="number" min="2048" class="w-full border rounded-lg p-2 mt-2"></label></details>
               <!-- API 密钥 -->
               <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
                 <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
@@ -565,8 +561,10 @@ watch(settingsTab, (tab) => {
               </div>
             </div>
 
+          <div v-if="settingsTab === 'connections'"><WorkbenchSettings section="connections" @changed="emit('refreshSettings')" /></div>
           <!-- 转录设置 -->
           <div v-if="settingsTab === 'transcription'" class="space-y-4">
+            <WorkbenchSettings section="models" @changed="emit('refreshSettings')" />
             <!-- 硬件配置 -->
             <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
               <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
@@ -739,47 +737,6 @@ watch(settingsTab, (tab) => {
               </button>
             </div>
 
-            <!-- B站 SESSDATA -->
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 space-y-3">
-              <div class="flex items-center justify-between gap-2">
-                <p class="text-sm font-medium text-slate-700">全局 B 站 SESSDATA</p>
-                <span class="text-xs px-2 py-0.5 rounded-full border border-slate-300 bg-white text-slate-600">
-                  来源: {{ bilibiliCookieSourceLabel }}
-                </span>
-              </div>
-              <p class="text-xs text-slate-500">
-                当前: {{ transcriptionSettings?.bilibili_sessdata_masked || '未设置' }}
-              </p>
-              <div class="relative">
-                <PhKey :size="16" class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  v-model="globalBilibiliSessdataInput"
-                  type="password"
-                  placeholder="输入后保存到本机配置"
-                  class="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                >
-              </div>
-              <p class="text-xs text-amber-600 mt-1">
-                提示：如果填写 SESSDATA 后依然获取字幕不成功，请尝试在对应浏览器重新登录或手动复制 SESSDATA。
-              </p>
-              <div class="grid grid-cols-2 gap-2">
-                <button
-                  @click="handleReadBilibiliCookieFromBrowser"
-                  :disabled="isReadingBilibiliCookieFromBrowser || isUpdatingTranscriptionSettings"
-                  class="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-600 py-2 rounded-xl text-xs font-medium border border-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <PhSpinner v-if="isReadingBilibiliCookieFromBrowser" :size="14" class="animate-spin" />
-                  <span>{{ isReadingBilibiliCookieFromBrowser ? '读取中...' : '从浏览器读取' }}</span>
-                </button>
-                <button
-                  @click="clearGlobalBilibiliSessdata"
-                  :disabled="isUpdatingTranscriptionSettings || !transcriptionSettings?.has_bilibili_sessdata"
-                  class="bg-white hover:bg-slate-50 text-slate-600 py-2 rounded-xl text-xs font-medium border border-slate-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  清空已保存 Cookie
-                </button>
-              </div>
-            </div>
             </div>
 
             <button
@@ -794,6 +751,7 @@ watch(settingsTab, (tab) => {
 
           <!-- Agent 设置 -->
           <div v-if="settingsTab === 'summarization'" class="space-y-4">
+            <WorkbenchSettings section="templates" />
             <!-- 使用说明 -->
             <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-2">
               <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
@@ -948,6 +906,7 @@ watch(settingsTab, (tab) => {
 
           <!-- 存储管理 -->
           <div v-if="settingsTab === 'storage'" class="space-y-4">
+            <WorkbenchSettings section="storage" />
             <div class="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
               <div class="flex items-center gap-2 pb-2 border-b border-slate-100">
                 <PhHardDrives :size="18" class="text-blue-500" />

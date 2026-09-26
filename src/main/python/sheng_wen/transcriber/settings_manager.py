@@ -215,7 +215,7 @@ REQUIRED_MANUAL_MODEL_FILES = (
     "config.json",
     "model.bin",
     "tokenizer.json",
-    "vocabulary.txt",
+    "vocabulary.txt 或 vocabulary.json",
 )
 
 
@@ -247,7 +247,14 @@ def _validate_manual_model_dir(model_path: str) -> tuple[bool, str, str]:
     if not os.path.isdir(abs_path):
         return (False, f"模型路径不是目录: {abs_path}", abs_path)
 
-    missing = [name for name in REQUIRED_MANUAL_MODEL_FILES if not os.path.isfile(os.path.join(abs_path, name))]
+    missing = [
+        alternatives
+        for alternatives in REQUIRED_MANUAL_MODEL_FILES
+        if not any(
+            os.path.isfile(os.path.join(abs_path, name))
+            for name in alternatives.split(" 或 ")
+        )
+    ]
     if missing:
         return (
             False,
@@ -295,6 +302,13 @@ class TranscriptionSettingsManager:
         if global_sessdata:
             return global_sessdata, "global"
 
+        from ..workbench.connections import get_connection
+        connection = get_connection()
+        connected = connection.cookies()
+        if connected.get("SESSDATA"):
+            return connected["SESSDATA"], connection.status()["source"]
+        if not connection.data.get("use_env", True):
+            return "", "none"
         env_sessdata = _read_env_bilibili_sessdata()
         if env_sessdata:
             return env_sessdata, "env"
@@ -449,20 +463,8 @@ class TranscriptionSettingsManager:
 
         transcriber = None
         if should_rebuild:
-            try:
-                logger.info(
-                    "[TranscriptionSettingsManager] 正在重建转录器实例，若模型未缓存可能会触发下载，请稍候..."
-                )
-                transcriber_kwargs = self._build_transcriber_kwargs(
-                    device=next_device,
-                    model_source=next_model_source,
-                    model_size=next_model_size,
-                    model_path=next_model_path,
-                )
-                transcriber = get_transcriber("fast_whisper", **transcriber_kwargs)
-                logger.info("[TranscriptionSettingsManager] 转录器实例重建完成。")
-            except Exception as e:
-                raise ValueError(f"切换转录配置失败: {e}") from e
+            from ..workbench.runtime import runtime
+            transcriber = runtime
 
         with self._lock:
             self._device = next_device
@@ -527,7 +529,6 @@ class TranscriptionSettingsManager:
 
         return {
             "success": True,
-            "sessdata": sessdata,
             "sessdata_masked": _mask_cookie_value(sessdata),
             "source_browser": browser_name,
         }

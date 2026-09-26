@@ -140,7 +140,7 @@ export function useTaskViewModel() {
   const selectedFile = ref<File | null>(null)
   const localFilePath = ref('')
   const quality = ref('audio_only')
-  const summaryMode = ref<Exclude<SummaryMode, 'auto'>>('standard')
+  const summaryMode = ref<SummaryMode>('auto')
   const isSubmitting = ref(false)
   const error = ref<string | null>(null)
   const activeTab = ref<'summary' | 'transcript'>('summary')
@@ -156,13 +156,16 @@ export function useTaskViewModel() {
   const isReadingBilibiliCookieFromBrowser = ref(false)
 
   let ws: WebSocket | null = null
+  let stopped = false
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  let detailTimer: ReturnType<typeof setTimeout> | undefined
   let submitAbortController: AbortController | null = null
 
   // --- Actions ---
   const fetchTasks = async () => {
     try {
-      const response = await axios.get(`${apiBaseUrl}/tasks/`)
-      tasks.value = response.data
+      const response = await axios.get(`${apiBaseUrl}/workbench/tasks?limit=40`)
+      tasks.value = response.data.items
       
       // Sync selected task details
       if (selectedTask.value) {
@@ -369,6 +372,12 @@ export function useTaskViewModel() {
         if (selectedTask.value?.id === updatedTask.id) {
           // Merge updates to preserve details that might not be in the broadcast
           selectedTask.value = { ...selectedTask.value, ...updatedTask }
+          if (!detailTimer) detailTimer = setTimeout(async () => {
+            detailTimer = undefined
+            const id = selectedTask.value?.id
+            if (!id || stopped) return
+            try { const data = (await axios.get(`${apiBaseUrl}/tasks/${id}`)).data; if (selectedTask.value?.id === id) selectedTask.value = data } catch {}
+          }, 600)
         }
       } else if (data.type === 'progress_update') {
         const { task_id, progress } = data
@@ -384,7 +393,7 @@ export function useTaskViewModel() {
 
     ws.onclose = () => {
       console.log('WebSocket disconnected, retrying in 3s...')
-      setTimeout(connectWebSocket, 3000)
+      if (!stopped) reconnectTimer = setTimeout(connectWebSocket, 3000)
     }
 
     ws.onerror = (err) => {
@@ -521,9 +530,9 @@ export function useTaskViewModel() {
     }
   }
 
-  const testLlm = async () => {
+  const testLlm = async (payload?: UpdateLLMSettingsRequest) => {
     try {
-      const response = await axios.post(`${apiBaseUrl}/llm/test`)
+      const response = await axios.post(`${apiBaseUrl}/llm/test`, payload)
       return response.data
     } catch (err) {
       console.error('Failed to test LLM:', err)
@@ -701,7 +710,7 @@ export function useTaskViewModel() {
 
   // --- Lifecycle ---
   onMounted(() => {
-    fetchTasks()
+    stopped = false
     fetchLlmProviders()
     fetchLlmSettings()
     fetchLlmPresets()
@@ -711,12 +720,17 @@ export function useTaskViewModel() {
   })
 
   onUnmounted(() => {
+    stopped = true
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    if (detailTimer) clearTimeout(detailTimer)
     if (ws) {
       ws.close()
     }
   })
 
+  const refreshSettings = async () => { await Promise.all([fetchTranscriptionSettings(), fetchLlmSettings(), fetchSummarizationSettings()]) }
   return {
+    refreshSettings,
     // State
     tasks,
     selectedTask,

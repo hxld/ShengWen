@@ -29,6 +29,10 @@ venv
 .env
 .env.local
 config/settings.json
+config/*.bak
+models/
+data/
+work/
 scripts/fetch_subtitle/.bilibili_cookie.env
 .claude/settings.local
 

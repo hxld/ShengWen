@@ -3,6 +3,7 @@ import { PhXCircle } from '@phosphor-icons/vue'
 import { computed, watch, nextTick, ref, onBeforeUnmount } from 'vue'
 import type { Task, MarkdownHeadingItem } from '../types'
 import { TaskStatus } from '../types'
+import TaskWorkbench from './TaskWorkbench.vue'
 import TaskMetaCard from './TaskMetaCard.vue'
 import { countWords } from '../utils/formatters'
 import { normalizeAccidentalInlineCodeBlocks } from '../utils/markdownNormalizer'
@@ -31,6 +32,7 @@ interface Props {
 const props = defineProps<Props>()
 
 const emit = defineEmits<{
+  refresh: []
   'open-mermaid-viewer': [target: HTMLElement]
   'start-edit-topic': []
   'save-topic': []
@@ -504,6 +506,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="contentScrollRef" class="flex-1 overflow-y-auto overflow-x-auto p-4 md:p-8 pt-16 md:pt-20 custom-scrollbar">
     <div class="max-w-4xl mx-auto">
+      <TaskWorkbench :task="task" @refresh="emit('refresh')" />
       <!-- 错误状态 -->
       <div v-if="isFailed" class="bg-red-50 border border-red-100 p-6 rounded-2xl mb-6">
         <div class="flex items-center gap-3 text-red-700 font-bold mb-2">

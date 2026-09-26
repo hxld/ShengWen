@@ -138,9 +138,11 @@ class Task(BaseModel):
     summary_chunk_total: Optional[int] = None
     summary_chunk_done: Optional[int] = None
     summary_meta: Optional[str] = None
+    source_map: Optional[List[dict]] = None
 
 
 class ReSummarizeRequest(BaseModel):
+    template: Optional[str] = None
     summary_mode: Optional[str] = Field(
         default=None,
         description="重新总结时指定模式: standard | agent | auto",
@@ -235,7 +237,6 @@ class TranscriptionSettingsUpdate(BaseModel):
 
 class BilibiliCookieFromBrowserResult(BaseModel):
     success: bool = Field(description="是否成功读取")
-    sessdata: Optional[str] = Field(default=None, description="读取到的 SESSDATA（完整值）")
     sessdata_masked: Optional[str] = Field(default=None, description="脱敏后的 SESSDATA")
     source_browser: Optional[str] = Field(default=None, description="读取来源浏览器")
     error: Optional[str] = Field(default=None, description="错误信息")
@@ -368,7 +369,7 @@ async def notify_task_update(task_id: str, task_data: dict = None):
 
         message = json.dumps({
             "type": "task_update",
-            "task": task_data
+            "task": {k: v for k, v in task_data.items() if k not in ("summary", "transcript", "summary_meta")}
         })
 
         await manager.broadcast(message)
@@ -472,7 +473,8 @@ async def get_transcriber_worker():
     else:
         logger.info(f"[Transcriber] 使用模型大小: {transcriber_config.get('model_size')}")
 
-    transcriber = get_transcriber("fast_whisper", **transcriber_config)
+    from .workbench.runtime import runtime
+    transcriber = runtime
     llm_w = await get_llm_worker()
     transcriber_worker = TranscriberWorker(
         name="TranscriberWorker",
@@ -928,7 +930,9 @@ async def _get_bilibili_video_title_and_parts(video_url: str) -> tuple[str, list
     else:
         bvid = match.group(1)
 
-    video_obj = video.Video(bvid=bvid)
+    from bilibili_api import Credential
+    from .workbench.connections import get_connection
+    video_obj = video.Video(bvid=bvid, credential=Credential.from_cookies(get_connection().cookies()))
     info = sync(video_obj.get_info())
 
     title = str(info.get("title") or "未知标题")
@@ -1078,6 +1082,8 @@ async def get_task(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     _trigger_author_resolution_if_needed(task)
+    from .workbench.store import get_store
+    task["source_map"] = get_store().meta(task_id).get("source_map", [])
     return task
 
 @app.patch("/tasks/{task_id}", response_model=Task)
@@ -1115,65 +1121,8 @@ async def export_task_to_obsidian(task_id: str):
     if not task.get("summary"):
         raise HTTPException(status_code=400, detail="任务尚无总结内容")
 
-    title = task.get("topic") or task.get("title") or "未命名视频"
-    video_url = task.get("video_url", "")
-    author_name = task.get("author_name", "")
-    author_url = task.get("author_url", "")
-    created_at = task.get("created_at", "")
-    if isinstance(created_at, str):
-        date_str = created_at[:10] if created_at else datetime.now().strftime("%Y-%m-%d")
-    else:
-        date_str = datetime.now().strftime("%Y-%m-%d")
-
-    # 清理文件名中的非法字符
-    safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip()[:80]
-    filename = f"{safe_title}.md"
-    obsidian_inbox = r"D:\study\hxld_obsidian\inbox"
-    file_path = os.path.join(obsidian_inbox, filename)
-
-    # 构建 frontmatter + 内容
-    lines = [
-        "---",
-        f"title: \"{title}\"",
-        f"date: {date_str}",
-        "tags:",
-        "  - 视频总结",
-        "  - AI笔记",
-    ]
-    if video_url:
-        lines.append(f"source: {video_url}")
-    if author_name:
-        lines.append(f"author: \"{author_name}\"")
-    if author_url:
-        lines.append(f"author_url: {author_url}")
-    lines.extend([
-        "type: 视频笔记",
-        "---",
-        "",
-        f"# {title}",
-        "",
-    ])
-    if video_url:
-        lines.append(f"> 来源：[{video_url}]({video_url})")
-    if author_name:
-        author_line = f"[{author_name}]({author_url})" if author_url else author_name
-        lines.append(f"> 作者：{author_line}")
-    if video_url or author_name:
-        lines.append("")
-
-    lines.append(task["summary"])
-
-    try:
-        os.makedirs(obsidian_inbox, exist_ok=True)
-        overwritten = os.path.exists(file_path)
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines))
-        logger.info(f"[Obsidian] 已导出: {file_path}{' (覆盖)' if overwritten else ''}")
-        return ExportObsidianResponse(success=True, file_path=file_path, overwritten=overwritten)
-    except Exception as e:
-        logger.error(f"[Obsidian] 导出失败: {e}")
-        return ExportObsidianResponse(success=False, error=str(e))
-
+    from .workbench.service import export_note
+    return export_note(task)
 
 @app.post("/tasks/{task_id}/re-summarize", response_model=Task)
 async def re_summarize_task(task_id: str, payload: ReSummarizeRequest | None = None):
@@ -1187,6 +1136,10 @@ async def re_summarize_task(task_id: str, payload: ReSummarizeRequest | None = N
     if not task.get("transcript"):
         raise HTTPException(status_code=400, detail="No transcript available for re-summarization")
     
+    from .workbench.store import get_store
+    get_store().version(task_id, "summary", task.get("summary"), {"reason": "before_regenerate"})
+    from .workbench.service import prepare_rerun
+    prepare_rerun(task_id)
     requested_mode = payload.summary_mode if payload else None
     resolved_summary_mode = _normalize_summary_mode(
         requested_mode,
@@ -1218,6 +1171,7 @@ async def re_summarize_task(task_id: str, payload: ReSummarizeRequest | None = N
         "intermediate_file_path": temp_file,
         "output_file": os.path.join("temp", f"{task_id}_re_summary.md"),
         "summary_mode": resolved_summary_mode,
+        "template": payload.template if payload and payload.template else get_store().setting("template", "course"),
     })
 
     return db.get_task(task_id)
@@ -1281,71 +1235,17 @@ async def batch_re_summarize():
 @app.post("/batch/export-obsidian", response_model=BatchResponse)
 async def batch_export_obsidian():
     """对所有有总结的任务批量导出到 Obsidian。"""
-    from datetime import datetime
-    all_tasks = db.list_tasks()
-    results: list[dict[str, str]] = []
-    count = 0
-
-    for task in all_tasks:
-        tid = task.get("id", "")
-        if not task.get("summary"):
-            continue
-
-        title = task.get("topic") or task.get("title") or "未命名视频"
-        video_url = task.get("video_url", "")
-        author_name = task.get("author_name", "")
-        author_url = task.get("author_url", "")
-        created_at = task.get("created_at", "")
-        if isinstance(created_at, str):
-            date_str = created_at[:10] if created_at else datetime.now().strftime("%Y-%m-%d")
-        else:
-            date_str = datetime.now().strftime("%Y-%m-%d")
-
-        safe_title = "".join(c for c in title if c not in r'\/:*?"<>|').strip()[:80]
-        filename = f"{safe_title}.md"
-        obsidian_inbox = r"D:\study\hxld_obsidian\inbox"
-        file_path = os.path.join(obsidian_inbox, filename)
-
-        lines = [
-            "---",
-            f"title: \"{title}\"",
-            f"date: {date_str}",
-            "tags:",
-            "  - 视频总结",
-            "  - AI笔记",
-        ]
-        if video_url:
-            lines.append(f"source: {video_url}")
-        if author_name:
-            lines.append(f"author: \"{author_name}\"")
-        if author_url:
-            lines.append(f"author_url: {author_url}")
-        lines.extend([
-            "type: 视频笔记",
-            "---",
-            "",
-            f"# {title}",
-            "",
-        ])
-        if video_url:
-            lines.append(f"> 来源：[{video_url}]({video_url})")
-        if author_name:
-            author_line = f"[{author_name}]({author_url})" if author_url else author_name
-            lines.append(f"> 作者：{author_line}")
-        if video_url or author_name:
-            lines.append("")
-        lines.append(task["summary"])
-
+    from .workbench.service import export_note
+    results=[]
+    for task in db.list_tasks():
+        if not task.get("summary"): continue
         try:
-            os.makedirs(obsidian_inbox, exist_ok=True)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-            count += 1
-            results.append({"id": tid, "title": title[:40], "status": "ok"})
-        except Exception as e:
-            results.append({"id": tid, "title": title[:40], "status": f"error: {e}"})
-
-    return BatchResponse(total=len(results), success_count=count, fail_count=len(results) - count, details=results)
+            export_note(task)
+            results.append({"id":task["id"],"status":"ok"})
+        except Exception as exc:
+            results.append({"id":task["id"],"status":str(exc)})
+    count=sum(r["status"]=="ok" for r in results)
+    return BatchResponse(total=len(results),success_count=count,fail_count=len(results)-count,details=results)
 
 
 @app.post("/tasks/{task_id}/resolve-author", response_model=Task)
@@ -1428,6 +1328,8 @@ async def re_transcribe_task(task_id: str, payload: ReTranscribeRequest | None =
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    from .workbench.service import prepare_rerun
+    prepare_rerun(task_id)
     requested_mode = payload.summary_mode if payload else None
     resolved_summary_mode = _normalize_summary_mode(
         requested_mode,
@@ -1516,6 +1418,8 @@ async def delete_task(task_id: str):
         logger.info(f"[delete_task] 任务 {task_id} 取消结果: " + ", ".join(cancellation_reports))
 
     db.delete_task(task_id)
+    from .workbench.store import get_store
+    get_store().delete_task(task_id)
     return None
 
 
@@ -1550,7 +1454,7 @@ async def update_llm_settings(payload: LLMSettingsUpdate):
 
 
 @app.post("/llm/test", response_model=LLMTestResult)
-async def test_llm_connection():
+async def test_llm_connection(payload: LLMSettingsUpdate | None = None):
     """测试当前 LLM 配置是否可用。"""
     from .llm.llm import LLMMessage, LLMResponseError, LLMConnectionError, get_llm
     import asyncio
@@ -1560,6 +1464,9 @@ async def test_llm_connection():
     try:
         # 使用当前运行时配置创建临时 LLM 客户端，不触发 worker 懒初始化。
         runtime_config = llm_provider_manager.get_runtime_config()
+        if payload is not None:
+            from dataclasses import replace
+            runtime_config = replace(runtime_config, **payload.model_dump(exclude_none=True))
         llm_client = get_llm(runtime_config)
 
         # 记录当前配置
@@ -1696,23 +1603,30 @@ async def activate_llm_preset(name: str):
     return settings
 
 
-
+@app.get("/transcription/settings", response_model=TranscriptionSettings)
 async def get_transcription_settings():
     """获取当前转录运行时设置。"""
-    return transcription_settings_manager.get_settings()
+    return await asyncio.to_thread(transcription_settings_manager.get_settings)
 
 
 @app.put("/transcription/settings", response_model=TranscriptionSettings)
 async def update_transcription_settings(payload: TranscriptionSettingsUpdate):
-    """更新转录运行时设置并应用到转录工作单元。"""
+    """更新设置，凭据统一保存在系统保护的连接模块。"""
+    from .workbench.connections import get_connection
     try:
-        settings = transcription_settings_manager.update_settings(
+        if payload.clear_bilibili_sessdata or payload.clear_bilibili_cookie_string:
+            get_connection().disconnect()
+            transcription_settings_manager._bilibili_sessdata = ""
+        elif payload.bilibili_cookie_string or payload.bilibili_sessdata:
+            get_connection().import_value(payload.bilibili_cookie_string or payload.bilibili_sessdata)
+            transcription_settings_manager._bilibili_sessdata = ""
+        settings = await asyncio.to_thread(transcription_settings_manager.update_settings,
             device=payload.device,
             model_source=payload.model_source,
             model_size=payload.model_size,
             model_path=payload.model_path,
             enable_bilibili_subtitle_fetch=payload.enable_bilibili_subtitle_fetch,
-            bilibili_sessdata=payload.bilibili_sessdata,
+            bilibili_sessdata="",
             clear_bilibili_sessdata=payload.clear_bilibili_sessdata,
         )
         config_manager.save_transcription_config(transcription_settings_manager.get_runtime_state())
@@ -1732,7 +1646,8 @@ async def get_bilibili_video_info(payload: BilibiliVideoInfoRequest):
         raise HTTPException(status_code=400, detail="不是有效的 B 站视频链接")
 
     try:
-        from bilibili_api import video, sync
+        from bilibili_api import video, sync, Credential
+        from .workbench.connections import get_connection
         import re
         from urllib.request import Request, urlopen
 
@@ -1757,8 +1672,8 @@ async def get_bilibili_video_info(payload: BilibiliVideoInfoRequest):
             bvid = match.group(1)
 
         # 获取视频信息
-        video_obj = video.Video(bvid=bvid)
-        info = sync(video_obj.get_info())
+        video_obj = video.Video(bvid=bvid, credential=Credential.from_cookies(get_connection().cookies()))
+        info = await video_obj.get_info()
 
         title = str(info.get("title") or "")
         duration = int(info.get("duration") or 0)
@@ -1809,10 +1724,14 @@ async def get_bilibili_video_info(payload: BilibiliVideoInfoRequest):
 @app.post("/transcription/settings/bilibili-cookie/from-browser", response_model=BilibiliCookieFromBrowserResult)
 async def read_bilibili_cookie_from_browser():
     """从浏览器读取 B 站 SESSDATA 并保存到全局配置。"""
-    result = transcription_settings_manager.read_cookie_from_browser()
-    if result["success"]:
+    from .workbench.connections import get_connection
+    try:
+        result = await asyncio.to_thread(get_connection().browser_import, "edge")
+        transcription_settings_manager._bilibili_sessdata = ""
         config_manager.save_transcription_config(transcription_settings_manager.get_runtime_state())
-    return result
+        return {"success": True, "sessdata_masked": result["masked"], "source_browser": result["source"]}
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
 
 
 @app.get("/summarization/settings", response_model=SummarizationSettings)
@@ -1858,6 +1777,7 @@ class TempCleanupStats(BaseModel):
 
 class TempCleanupResult(BaseModel):
     success: bool
+    skipped_files: int = 0
     deleted_files: int = 0
     freed_size_mb: float = 0.0
     error: str = ""
@@ -1867,6 +1787,7 @@ class TempCleanupResult(BaseModel):
 async def get_temp_stats():
     """获取 temp 目录的文件统计信息。"""
     import time as _time
+    from pathlib import Path
     temp_dir = "temp"
     if not os.path.isdir(temp_dir):
         return TempCleanupStats(total_files=0, total_size_mb=0.0, files_by_date={})
@@ -1875,8 +1796,8 @@ async def get_temp_stats():
     total_size = 0
     files_by_date: dict[str, int] = {}
 
-    for entry in os.scandir(temp_dir):
-        if not entry.is_file():
+    for entry in Path(temp_dir).rglob("*"):
+        if not entry.is_file() or entry.is_symlink():
             continue
         total_files += 1
         total_size += entry.stat().st_size
@@ -1897,68 +1818,8 @@ async def cleanup_temp_files(before_date: str = ""):
     清理 temp 目录文件。
     - before_date: 删除此日期之前（含）的文件，格式 YYYY-MM-DD；为空则删除全部临时文件
     """
-    import time as _time
-    temp_dir = "temp"
-    if not os.path.isdir(temp_dir):
-        return TempCleanupResult(success=True)
-
-    # 收集正在进行的任务关联的文件前缀，避免误删
-    active_prefixes: set[str] = set()
-    for t in db.list_tasks():
-        status = t.get("status", "")
-        if status not in (TaskStatus.COMPLETED, TaskStatus.FAILED):
-            tid = str(t.get("id", ""))
-            if tid:
-                active_prefixes.add(tid)
-            video_url = str(t.get("video_url") or "")
-            bv_match = re.search(r"(BV[0-9A-Za-z]+)", video_url)
-            if bv_match:
-                active_prefixes.add(bv_match.group(1))
-
-    cutoff_ts = None
-    if before_date:
-        try:
-            from datetime import datetime as _dt
-            cutoff_dt = _dt.strptime(before_date, "%Y-%m-%d")
-            cutoff_ts = _dt(cutoff_dt.year, cutoff_dt.month, cutoff_dt.day, 23, 59, 59).timestamp()
-        except ValueError:
-            raise HTTPException(status_code=400, detail="日期格式无效，请使用 YYYY-MM-DD")
-
-    deleted_files = 0
-    freed_size = 0
-
-    for entry in os.scandir(temp_dir):
-        if not entry.is_file():
-            continue
-        name = entry.name
-
-        # 跳过正在进行的任务的文件
-        skip = False
-        for prefix in active_prefixes:
-            if name.startswith(prefix):
-                skip = True
-                break
-        if skip:
-            continue
-
-        # 如果指定了日期，检查文件修改时间
-        if cutoff_ts is not None:
-            if entry.stat().st_mtime > cutoff_ts:
-                continue
-
-        try:
-            freed_size += entry.stat().st_size
-            os.remove(entry.path)
-            deleted_files += 1
-        except OSError:
-            pass
-
-    logger.info(f"[Temp] 清理完成: 删除 {deleted_files} 个文件, 释放 {freed_size / (1024*1024):.2f} MB")
-    return TempCleanupResult(
-        success=True,
-        deleted_files=deleted_files,
-        freed_size_mb=round(freed_size / (1024 * 1024), 2),
-    )
+    from .workbench.service import cleanup
+    return TempCleanupResult(**cleanup(before_date))
 
 
 @app.websocket("/ws")
@@ -1974,3 +1835,8 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+from .workbench.router import router as workbench_router
+from .workbench.access import AccessMiddleware, value_error_handler
+app.include_router(workbench_router)
+app.add_middleware(AccessMiddleware)
+app.add_exception_handler(ValueError, value_error_handler)

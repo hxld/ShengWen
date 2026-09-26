@@ -105,6 +105,17 @@ class Worker(ABC):
         if task_id and task_id in self._cancelled_task_ids:
             logger.info(f"[{self.name}] 跳过已取消任务: {task_id}")
             return
+        if task_id:
+            from .workbench.store import get_store
+            if any(self._extract_task_id(t.payload) == task_id for t in self._task_queue._queue):
+                return
+            payload = dict(payload)
+            import uuid
+            payload.setdefault("summary_run_id", uuid.uuid4().hex)
+            payload.setdefault("template", get_store().setting("template", "course"))
+            from .config.settings import config
+            payload.setdefault("model_snapshot", {"asr": config.whisper.configured_model_path or config.whisper.model_size, "device": config.whisper.device, "llm": config.llm.model_id, "provider": config.llm.provider})
+            get_store().record(task_id, self.name, payload)
         task = Task(payload=payload)
         await self._task_queue.put(task)
         logger.info(f"[{self.name}] 任务已添加到队列。队列大小: {self._task_queue.qsize()}")
@@ -130,6 +141,7 @@ class Worker(ABC):
                 queued_task_id = self._extract_task_id(queued_task.payload)
                 if queued_task_id == normalized:
                     removed += 1
+                    self._task_queue.task_done()
                     continue
                 kept.append(queued_task)
             queue_ref.extend(kept)
@@ -141,6 +153,7 @@ class Worker(ABC):
             self._active_task_id == normalized
             and self._active_process_task is not None
             and not self._active_process_task.done()
+            and inspect.iscoroutinefunction(self.process_task)
         ):
             self._active_process_task.cancel()
             cancelled_running = True

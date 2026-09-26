@@ -31,6 +31,7 @@ export interface Task {
   summary_chunk_total?: number;
   summary_chunk_done?: number;
   summary_meta?: string;
+  source_map?: Array<{start:number;end:number;part:number;url:string}>;
 }
 
 export interface CreateTaskRequest {

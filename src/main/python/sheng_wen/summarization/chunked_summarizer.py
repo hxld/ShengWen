@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -81,7 +82,9 @@ class ChunkedSummarizer:
         cancel_check: Callable[[], bool] | None = None,
         chunk_debug_dump_enabled: bool = False,
         chunk_debug_dump_dir: str = "temp/chunk_debug",
+        checkpoint_path: str | None = None,
     ):
+        self._checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
         self._llm_client = llm_client
         self._chunk_system_prompt = chunk_system_prompt
         self._chunk_target_duration_sec = max(60, int(chunk_target_duration_sec))
@@ -116,6 +119,19 @@ class ChunkedSummarizer:
         if on_chunk_progress:
             on_chunk_progress(0, len(chunks), "")
 
+        signature = hashlib.sha256(json.dumps({
+            "text": transcript_text, "prompt": self._chunk_system_prompt,
+            "model": str(getattr(self._llm_client, "config", "")),
+            "chunks": [c.text for c in chunks], "tail_lines": self._prev_tail_timestamp_lines_m,
+            "tail_chars": self._prev_summary_tail_chars_j, "state_limit": self._max_agent_value_chars,
+        }, ensure_ascii=False).encode()).hexdigest()
+        saved_outputs = []
+        if self._checkpoint_path and self._checkpoint_path.exists():
+            try:
+                saved = json.loads(self._checkpoint_path.read_text(encoding="utf-8"))
+                if saved.get("signature") == signature:
+                    saved_outputs = saved.get("outputs", [])
+            except (ValueError, OSError): pass
         for idx, chunk in enumerate(chunks):
             self._ensure_not_cancelled()
             self._prepare_program_state(state, chunk, idx, chunks, chunk_outputs)
@@ -139,11 +155,18 @@ class ChunkedSummarizer:
                     preview = f"{chunk_prefix.rstrip()}\n\n{partial_chunk_output}"
                 on_chunk_stream(idx, len(chunks), preview)
 
-            output = await self._call_llm_with_retry(
-                user_prompt,
-                on_partial=emit_chunk_stream if on_chunk_stream else None,
-            )
+            if idx < len(saved_outputs):
+                output = saved_outputs[idx]
+            else:
+                output = await self._call_llm_with_retry(
+                    user_prompt, on_partial=emit_chunk_stream if on_chunk_stream else None,
+                )
             chunk_outputs.append(output)
+            if self._checkpoint_path:
+                self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                temp = self._checkpoint_path.with_suffix(".tmp")
+                temp.write_text(json.dumps({"signature":signature,"outputs":chunk_outputs},ensure_ascii=False),encoding="utf-8")
+                temp.replace(self._checkpoint_path)
 
             parsed_ops, parse_warnings = parse_state_ops(output)
             if parse_warnings:

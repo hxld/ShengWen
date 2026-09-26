@@ -1,6 +1,4 @@
 import asyncio
-import os
-import tempfile
 from dataclasses import asdict, dataclass
 from typing import Any, Dict
 
@@ -44,12 +42,9 @@ def _extract_bilibili_author(video_url: str) -> BilibiliAuthorInfo:
         "extract_flat": False,
     }
 
-    # B 站需要 cookie 避免 412
-    cookie_file = os.path.join(tempfile.gettempdir(), "shengwen_bilibili_cookies.txt")
-    if os.path.exists(cookie_file):
-        ydl_opts['cookiefile'] = cookie_file
-
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        from ..workbench.connections import attach_cookies
+        attach_cookies(ydl)
         info_dict = ydl.extract_info(video_url, download=False)
 
     info = _unwrap_info_dict(info_dict)
@@ -73,6 +68,21 @@ def _extract_bilibili_author(video_url: str) -> BilibiliAuthorInfo:
 
 async def resolve_bilibili_author(video_url: str, timeout_sec: float = 20.0) -> Dict[str, str]:
     """异步解析 B 站视频作者信息。"""
+    import re
+    match = re.search(r"BV[0-9A-Za-z]+", video_url)
+    if match:
+        try:
+            from bilibili_api import video, Credential
+            from ..workbench.connections import get_connection
+            item = video.Video(bvid=match.group(), credential=Credential.from_cookies(get_connection().cookies()))
+            info = await asyncio.wait_for(item.get_info(), timeout=timeout_sec)
+            owner = info.get("owner") or {}
+            if owner.get("name") and str(owner.get("mid", "")).isdigit():
+                return {"author_name": str(owner["name"]), "author_url": f"https://space.bilibili.com/{owner['mid']}"}
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
     try:
         result = await asyncio.wait_for(
             asyncio.to_thread(_extract_bilibili_author, video_url),

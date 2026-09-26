@@ -31,6 +31,7 @@ import ToastContainer from './components/ToastContainer.vue'
 
 const {
   tasks,
+  refreshSettings,
   selectedTask,
   videoUrl,
   selectedFile,
@@ -493,15 +494,13 @@ const handleUpdateLlmSettingsAndTest = async (payload: {
   temperature?: number
 }) => {
   try {
-    // 先保存配置
-    await updateLlmSettings(payload)
-    success('LLM 配置已更新')
-
-    // 配置保存成功后立即测试
-    await handleTestLlm()
+    isTestingLlm.value = true
+    const result = await testLlm(payload)
+    if (result.status === 'success') success('草稿连接测试通过，尚未保存配置')
+    else toastError(result.message)
   } catch (_e) {
-    // 错误信息由 useTaskViewModel + Toast 统一处理
-  }
+    // Error is surfaced by the view model.
+  } finally { isTestingLlm.value = false }
 }
 
 const handleSaveLlmPreset = async (preset: { name: string; provider: string; base_url: string; api_key?: string; model_id: string; temperature: number; context_window_size: number }) => {
@@ -775,12 +774,13 @@ watch(summaryImageSettings, (nextSettings) => {
 }, { deep: true })
 
 // 配置 marked 渲染器以支持 mermaid 类名
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]!))
 const renderer = new marked.Renderer()
 renderer.code = ({ text, lang }) => {
   if (lang === 'mermaid') {
-    return `<pre class="mermaid">${text}</pre>`
+    return `<pre class="mermaid">${escapeHtml(text)}</pre>`
   }
-  return `<pre><code class="language-${lang}">${text}</code></pre>`
+  return `<pre><code class="language-${escapeHtml(lang || "")}">${escapeHtml(text)}</code></pre>`
 }
 marked.setOptions({ renderer })
 
@@ -790,6 +790,7 @@ const compiledMarkdown = computed(() => {
   const html = marked.parse(cleanedSummary) as string
   return postProcessCompiledMarkdown(html, {
     videoUrl: selectedTask.value.video_url || '',
+    sourceMap: selectedTask.value.source_map,
   })
 })
 
@@ -851,6 +852,7 @@ watch(
       :isBatchReSummarizing="isBatchReSummarizing"
       :isBatchExportingObsidian="isBatchExportingObsidian"
       @close="isSettingsModalOpen = false"
+      @refreshSettings="refreshSettings"
       @updateLlmSettings="handleUpdateLlmSettings"
       @updateLlmSettingsAndTest="handleUpdateLlmSettingsAndTest"
       @testLlm="handleTestLlm"
@@ -929,6 +931,7 @@ watch(
 
         <!-- 内容滚动区 -->
         <TaskContentArea
+          @refresh="selectTask(selectedTask)"
           :task="selectedTask"
           :active-tab="activeTab"
           :compiled-markdown="compiledMarkdown"
